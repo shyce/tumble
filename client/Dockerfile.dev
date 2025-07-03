@@ -1,0 +1,21 @@
+FROM node:lts-alpine
+
+# Install pnpm
+RUN corepack enable
+RUN corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml* ./
+
+# Install dependencies
+RUN pnpm install
+
+# Copy application files
+COPY . .
+
+EXPOSE 3000
+
+# Run with Turbopack in development
+CMD ["pnpm", "dev"]

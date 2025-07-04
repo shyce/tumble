@@ -1,72 +1,84 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Sparkles, Calendar, CreditCard, CheckCircle, ArrowLeft, Package } from 'lucide-react'
-
-interface Plan {
-  id: string
-  name: string
-  price: number
-  frequency: string
-  bags: number
-  additionalBagPrice: number
-  popular?: boolean
-  features: string[]
-}
-
-const plans: Plan[] = [
-  {
-    id: 'biweekly-standard',
-    name: 'Bi-Weekly Plan',
-    price: 90,
-    frequency: 'bi-weekly',
-    bags: 2,
-    additionalBagPrice: 40,
-    features: [
-      '2 standard bags per month ($45 value each)',
-      'Pickup & delivery included',
-      'Professional wash & fold',
-      'Eco-friendly detergents',
-      '48-hour turnaround',
-      'Add sensitive skin detergent +$3',
-      'Add scent booster +$3'
-    ]
-  },
-  {
-    id: 'weekly-standard',
-    name: 'Weekly Plan',
-    price: 170,
-    frequency: 'weekly',
-    bags: 4,
-    additionalBagPrice: 40,
-    popular: true,
-    features: [
-      '4 standard bags per month ($45 value each)',
-      'Save $10/month vs pay-per-bag',
-      'Pickup & delivery included',
-      'Professional wash & fold',
-      'Eco-friendly detergents',
-      '24-hour turnaround',
-      'Priority support',
-      'Add sensitive skin detergent +$3',
-      'Add scent booster +$3'
-    ]
-  }
-]
+import { subscriptionApi, SubscriptionPlan } from '@/lib/api'
 
 export default function SubscriptionPage() {
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([])
   const [loading, setLoading] = useState(false)
+  const [plansLoading, setPlansLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
-  const handleSubscribe = async (planId: string) => {
+  // Load subscription plans from the API
+  useEffect(() => {
+    const loadPlans = async () => {
+      try {
+        const fetchedPlans = await subscriptionApi.getPlans()
+        setPlans(fetchedPlans)
+      } catch (err) {
+        console.error('Error loading plans:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load subscription plans')
+      } finally {
+        setPlansLoading(false)
+      }
+    }
+
+    loadPlans()
+  }, [])
+
+  const handleSubscribe = async (planId: number) => {
     setLoading(true)
-    // TODO: Implement subscription API call
-    setTimeout(() => {
+    setError(null)
+    
+    try {
+      await subscriptionApi.createSubscription({ plan_id: planId })
       router.push('/dashboard')
-    }, 1000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create subscription')
+      setLoading(false)
+    }
+  }
+
+  // Helper function to determine if a plan is popular (Weekly Standard)
+  const isPlanPopular = (plan: SubscriptionPlan) => {
+    return plan.name === 'Weekly Standard'
+  }
+
+  // Helper function to get plan features based on plan details
+  const getPlanFeatures = (plan: SubscriptionPlan) => {
+    const baseFeatures = [
+      `${plan.pickups_per_month} bags per month ($45 value each)`,
+      'Pickup & delivery included',
+      'Professional wash & fold',
+      'Eco-friendly detergents',
+    ]
+
+    if (plan.name.includes('Weekly')) {
+      baseFeatures.push('24-hour turnaround', 'Priority support')
+      if (plan.name.includes('Standard')) {
+        baseFeatures.splice(1, 0, 'Save $10/month vs pay-per-bag')
+      }
+    } else {
+      baseFeatures.push('48-hour turnaround')
+    }
+
+    baseFeatures.push('Add sensitive skin detergent +$3', 'Add scent booster +$3')
+    return baseFeatures
+  }
+
+  if (plansLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading subscription plans...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -102,59 +114,72 @@ export default function SubscriptionPage() {
           </p>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8 max-w-3xl mx-auto">
+            <p className="text-red-700 text-center">{error}</p>
+          </div>
+        )}
+
         {/* Plans Grid */}
         <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto mb-12">
-          {plans.map((plan) => (
-            <div
-              key={plan.id}
-              className={`bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all border-2 ${
-                plan.popular ? 'border-teal-200' : 'border-slate-200'
-              } relative`}
-            >
-              {plan.popular && (
-                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <span className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
-                    MOST POPULAR
-                  </span>
-                </div>
-              )}
+          {plans.filter(plan => plan.is_active).map((plan) => {
+            const popular = isPlanPopular(plan)
+            const features = getPlanFeatures(plan)
+            const frequency = plan.name.includes('Weekly') ? 'weekly' : 'bi-weekly'
 
-              <div className="flex items-center mb-6">
-                <Calendar className={`w-6 h-6 ${plan.popular ? 'text-emerald-500' : 'text-teal-500'} mr-3`} />
-                <h3 className="text-2xl font-bold text-slate-800">{plan.name}</h3>
-              </div>
-
-              <div className="text-4xl font-bold text-slate-900 mb-2">
-                ${plan.price}
-                <span className="text-lg text-slate-500 font-normal">/month</span>
-              </div>
-
-              <p className="text-slate-600 mb-6">
-                {plan.bags} bags per month ({plan.frequency} pickup)
-              </p>
-
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((feature, index) => (
-                  <li key={index} className="flex items-start">
-                    <CheckCircle className={`w-5 h-5 ${plan.popular ? 'text-emerald-500' : 'text-teal-500'} mr-3 flex-shrink-0 mt-0.5`} />
-                    <span className="text-slate-600 text-sm">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <button
-                onClick={() => handleSubscribe(plan.id)}
-                disabled={loading}
-                className={`w-full py-4 rounded-xl font-semibold transition-all transform hover:scale-105 shadow-lg ${
-                  plan.popular
-                    ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:from-teal-600 hover:to-emerald-600'
-                    : 'bg-gradient-to-r from-slate-600 to-slate-700 text-white hover:from-slate-700 hover:to-slate-800'
-                } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            return (
+              <div
+                key={plan.id}
+                className={`bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all border-2 ${
+                  popular ? 'border-teal-200' : 'border-slate-200'
+                } relative`}
               >
-                {loading ? 'Processing...' : 'Select Plan'}
-              </button>
-            </div>
-          ))}
+                {popular && (
+                  <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                    <span className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+                      MOST POPULAR
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center mb-6">
+                  <Calendar className={`w-6 h-6 ${popular ? 'text-emerald-500' : 'text-teal-500'} mr-3`} />
+                  <h3 className="text-2xl font-bold text-slate-800">{plan.name}</h3>
+                </div>
+
+                <div className="text-4xl font-bold text-slate-900 mb-2">
+                  ${plan.price_per_month}
+                  <span className="text-lg text-slate-500 font-normal">/month</span>
+                </div>
+
+                <p className="text-slate-600 mb-6">
+                  {plan.pickups_per_month} bags per month ({frequency} pickup)
+                </p>
+
+                <ul className="space-y-3 mb-8">
+                  {features.map((feature, index) => (
+                    <li key={index} className="flex items-start">
+                      <CheckCircle className={`w-5 h-5 ${popular ? 'text-emerald-500' : 'text-teal-500'} mr-3 flex-shrink-0 mt-0.5`} />
+                      <span className="text-slate-600 text-sm">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <button
+                  onClick={() => handleSubscribe(plan.id)}
+                  disabled={loading}
+                  className={`w-full py-4 rounded-xl font-semibold transition-all transform hover:scale-105 shadow-lg ${
+                    popular
+                      ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:from-teal-600 hover:to-emerald-600'
+                      : 'bg-gradient-to-r from-slate-600 to-slate-700 text-white hover:from-slate-700 hover:to-slate-800'
+                  } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {loading ? 'Processing...' : 'Select Plan'}
+                </button>
+              </div>
+            )
+          })}
         </div>
 
         {/* Additional Options */}

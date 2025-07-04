@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,69 +90,8 @@ func (h *SubscriptionHandler) handleGetPlans(w http.ResponseWriter, r *http.Requ
 		plans = append(plans, plan)
 	}
 
-	// Transform plans to match frontend expectations
-	transformedPlans := []map[string]interface{}{}
-	for _, plan := range plans {
-		// Calculate bags based on plan type
-		bags := plan.PickupsPerMonth
-		bagType := "standard"
-		if strings.Contains(plan.Name, "Rush") {
-			bagType = "rush"
-		}
-
-		// Determine frequency
-		frequency := "weekly"
-		if strings.Contains(plan.Name, "Bi-Weekly") {
-			frequency = "bi-weekly"
-		}
-
-		// Build features list
-		features := []string{
-			fmt.Sprintf("%d %s bags per month", bags, bagType),
-			"Pickup & delivery included",
-			"Professional wash & fold",
-			"Eco-friendly detergents",
-		}
-
-		if bagType == "standard" {
-			if frequency == "weekly" {
-				features = append(features, "24-hour turnaround")
-				features = append(features, "Save $10/month vs pay-per-bag")
-				features = append(features, "Priority support")
-			} else {
-				features = append(features, "48-hour turnaround")
-			}
-		} else {
-			features = append(features, "Rush service - same day turnaround")
-		}
-
-		features = append(features, "Add sensitive skin detergent +$3")
-		features = append(features, "Add scent booster +$3")
-
-		// Adjust pricing to match README
-		price := plan.PricePerMonth
-		if plan.Name == "Weekly Standard" {
-			price = 170.00
-		} else if plan.Name == "Bi-Weekly Standard" {
-			price = 90.00
-		}
-
-		transformedPlan := map[string]interface{}{
-			"id":                   fmt.Sprintf("%s-%s", strings.ToLower(frequency), bagType),
-			"name":                 plan.Name,
-			"price":                price,
-			"frequency":            frequency,
-			"bags":                 bags,
-			"additionalBagPrice":   40,
-			"features":             features,
-			"popular":              plan.Name == "Weekly Standard",
-		}
-
-		transformedPlans = append(transformedPlans, transformedPlan)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(transformedPlans)
+	json.NewEncoder(w).Encode(plans)
 }
 
 // handleGetSubscription returns the current user's subscription

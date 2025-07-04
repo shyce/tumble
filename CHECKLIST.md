@@ -53,8 +53,10 @@
 
 ## Backend API Development
 - [x] Create order management API endpoints
-- [x] Implement subscription management API
+- [x] Implement subscription management API (create, read, update, cancel, plan changes)
 - [x] Add real-time order tracking with Centrifuge
+- [x] Create comprehensive test suite with 55%+ coverage  
+- [x] Create pickup scheduling system (frontend page + API integration)
 - [ ] Create admin panel API endpoints
 - [ ] Add payment integration (Stripe)
 

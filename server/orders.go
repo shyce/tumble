@@ -102,11 +102,65 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Calculate totals
+	// Check for active subscription and apply benefits
+	var subscriptionID *int
+	var pickupsUsed, pickupsAllowed int
+	var subscription struct {
+		ID                    int
+		PickupsPerMonth      int
+		PickupsUsedThisPeriod int
+		CurrentPeriodStart    string
+		CurrentPeriodEnd      string
+	}
+	
+	err = h.db.QueryRow(`
+		SELECT s.id, p.pickups_per_month, s.pickups_used_this_period,
+			   s.current_period_start, s.current_period_end
+		FROM subscriptions s
+		JOIN subscription_plans p ON s.plan_id = p.id
+		WHERE s.user_id = $1 AND s.status = 'active'
+		ORDER BY s.created_at DESC
+		LIMIT 1`,
+		userID,
+	).Scan(&subscription.ID, &subscription.PickupsPerMonth, 
+		&subscription.PickupsUsedThisPeriod, &subscription.CurrentPeriodStart,
+		&subscription.CurrentPeriodEnd)
+	
+	if err == nil {
+		// User has active subscription
+		subscriptionID = &subscription.ID
+		pickupsUsed = subscription.PickupsUsedThisPeriod
+		pickupsAllowed = subscription.PickupsPerMonth
+	}
+	
+	// Calculate totals with subscription benefits
 	var subtotal float64
+	var standardBagCount int
+	
 	for _, item := range req.Items {
+		// Count standard bags for subscription benefits
+		var serviceName string
+		h.db.QueryRow("SELECT name FROM services WHERE id = $1", item.ServiceID).Scan(&serviceName)
+		
+		if serviceName == "standard_bag" {
+			standardBagCount += item.Quantity
+		}
+		
 		subtotal += item.Price * float64(item.Quantity)
 	}
+	
+	// Apply subscription discount if applicable
+	if subscriptionID != nil && pickupsUsed < pickupsAllowed {
+		// User has pickup remaining in subscription
+		// Standard bags are covered, only charge for extras
+		if standardBagCount > 0 {
+			// Remove cost of standard bags covered by subscription
+			var standardBagPrice float64
+			h.db.QueryRow("SELECT base_price FROM services WHERE name = 'standard_bag'").Scan(&standardBagPrice)
+			subtotal -= standardBagPrice * float64(standardBagCount)
+		}
+	}
+	
 	tax := subtotal * 0.08 // 8% tax
 	total := subtotal + tax
 
@@ -122,13 +176,13 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 	var orderID int
 	err = tx.QueryRow(`
 		INSERT INTO orders (
-			user_id, pickup_address_id, delivery_address_id, 
+			user_id, subscription_id, pickup_address_id, delivery_address_id, 
 			status, subtotal, tax, total,
 			special_instructions, pickup_date, delivery_date,
 			pickup_time_slot, delivery_time_slot
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id`,
-		userID, req.PickupAddressID, req.DeliveryAddressID,
+		userID, subscriptionID, req.PickupAddressID, req.DeliveryAddressID,
 		"scheduled", subtotal, tax, total,
 		req.SpecialInstructions, req.PickupDate, req.DeliveryDate,
 		req.PickupTimeSlot, req.DeliveryTimeSlot,
@@ -160,6 +214,21 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		http.Error(w, "Failed to create status history", http.StatusInternalServerError)
 		return
+	}
+
+	// Update subscription pickup count if using subscription
+	if subscriptionID != nil && standardBagCount > 0 {
+		_, err = tx.Exec(`
+			UPDATE subscriptions 
+			SET pickups_used_this_period = pickups_used_this_period + 1,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1`,
+			*subscriptionID,
+		)
+		if err != nil {
+			http.Error(w, "Failed to update subscription usage", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Commit transaction
@@ -264,6 +333,30 @@ func (h *OrderHandler) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to parse orders", http.StatusInternalServerError)
 			return
 		}
+
+		// Fetch order items for each order
+		itemRows, err := h.db.Query(`
+			SELECT oi.id, oi.order_id, oi.service_id, s.name, oi.quantity, oi.weight, oi.price, oi.notes
+			FROM order_items oi
+			JOIN services s ON oi.service_id = s.id
+			WHERE oi.order_id = $1`,
+			order.ID,
+		)
+		if err == nil {
+			order.Items = []OrderItem{}
+			for itemRows.Next() {
+				var item OrderItem
+				err := itemRows.Scan(
+					&item.ID, &item.OrderID, &item.ServiceID, &item.ServiceName,
+					&item.Quantity, &item.Weight, &item.Price, &item.Notes,
+				)
+				if err == nil {
+					order.Items = append(order.Items, item)
+				}
+			}
+			itemRows.Close()
+		}
+
 		orders = append(orders, order)
 	}
 

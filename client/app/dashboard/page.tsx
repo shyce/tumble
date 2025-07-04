@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Sparkles, Calendar, Package, Settings, CreditCard, Clock, CheckCircle, Truck } from 'lucide-react'
+import { Sparkles, Calendar, Package, Settings, CheckCircle, Truck, CreditCard } from 'lucide-react'
+import { subscriptionApi, Subscription } from '@/lib/api'
 
 interface User {
   id: number
@@ -19,27 +20,41 @@ interface User {
 
 export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null)
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    const token = localStorage.getItem('auth_token')
-    const userData = localStorage.getItem('user')
-    
-    if (!token || !userData) {
-      router.push('/auth/signin')
-      return
+    const loadUserData = async () => {
+      const token = localStorage.getItem('auth_token')
+      const userData = localStorage.getItem('user')
+      
+      if (!token || !userData) {
+        router.push('/auth/signin')
+        return
+      }
+
+      try {
+        const parsedUser = JSON.parse(userData)
+        setUser(parsedUser)
+        
+        // Fetch current subscription
+        try {
+          const currentSubscription = await subscriptionApi.getCurrentSubscription()
+          setSubscription(currentSubscription)
+        } catch (err) {
+          console.error('Error fetching subscription:', err)
+          // User might not have a subscription, which is fine
+        }
+      } catch (error) {
+        router.push('/auth/signin')
+        return
+      }
+      
+      setLoading(false)
     }
 
-    try {
-      const parsedUser = JSON.parse(userData)
-      setUser(parsedUser)
-    } catch (error) {
-      router.push('/auth/signin')
-      return
-    }
-    
-    setLoading(false)
+    loadUserData()
   }, [router])
 
   const handleSignOut = () => {
@@ -197,12 +212,29 @@ export default function Dashboard() {
                   <dl className="space-y-3">
                     <div className="flex items-center justify-between py-3 border-b border-slate-100">
                       <dt className="text-sm font-medium text-slate-500">Current Plan</dt>
-                      <dd className="text-sm font-semibold text-slate-900">No active subscription</dd>
+                      <dd className="text-sm font-semibold text-slate-900">
+                        {subscription ? (
+                          <span className="flex items-center">
+                            {subscription.plan?.name || 'Active Subscription'}
+                            <span className="ml-2 px-2 py-1 bg-emerald-100 text-emerald-800 text-xs rounded-full">
+                              {subscription.status}
+                            </span>
+                          </span>
+                        ) : (
+                          'No active subscription'
+                        )}
+                      </dd>
                     </div>
                     
                     <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                      <dt className="text-sm font-medium text-slate-500">Next Pickup</dt>
-                      <dd className="text-sm font-semibold text-slate-900">Not scheduled</dd>
+                      <dt className="text-sm font-medium text-slate-500">Monthly Price</dt>
+                      <dd className="text-sm font-semibold text-slate-900">
+                        {subscription ? (
+                          `$${subscription.plan?.price_per_month || 0}/month`
+                        ) : (
+                          'Not available'
+                        )}
+                      </dd>
                     </div>
                     
                     <div className="flex items-center justify-between py-3">
@@ -215,12 +247,21 @@ export default function Dashboard() {
                   </dl>
                   
                   <div className="mt-6">
-                    <Link
-                      href="/dashboard/subscription"
-                      className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white text-center py-3 px-4 rounded-xl font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg inline-block"
-                    >
-                      Choose a Plan
-                    </Link>
+                    {subscription ? (
+                      <Link
+                        href="/dashboard/subscription"
+                        className="w-full bg-gradient-to-r from-slate-500 to-slate-600 text-white text-center py-3 px-4 rounded-xl font-semibold hover:from-slate-600 hover:to-slate-700 transition-all transform hover:scale-105 shadow-lg inline-block"
+                      >
+                        Manage Subscription
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/dashboard/subscription"
+                        className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white text-center py-3 px-4 rounded-xl font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg inline-block"
+                      >
+                        Choose a Plan
+                      </Link>
+                    )}
                   </div>
                 </div>
               </div>

@@ -3,42 +3,100 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Sparkles, Calendar, CreditCard, CheckCircle, ArrowLeft, Package } from 'lucide-react'
-import { subscriptionApi, SubscriptionPlan } from '@/lib/api'
+import { Sparkles, Calendar, CheckCircle, ArrowLeft, Package } from 'lucide-react'
+import { subscriptionApi, SubscriptionPlan, Subscription } from '@/lib/api'
 
 export default function SubscriptionPage() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([])
+  const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(false)
   const [plansLoading, setPlansLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const router = useRouter()
 
-  // Load subscription plans from the API
+  // Load subscription plans and current subscription
   useEffect(() => {
-    const loadPlans = async () => {
+    const loadData = async () => {
       try {
-        const fetchedPlans = await subscriptionApi.getPlans()
+        // Load plans and current subscription in parallel
+        const [fetchedPlans, currentSub] = await Promise.all([
+          subscriptionApi.getPlans(),
+          subscriptionApi.getCurrentSubscription()
+        ])
+        
         setPlans(fetchedPlans)
+        setCurrentSubscription(currentSub)
       } catch (err) {
-        console.error('Error loading plans:', err)
-        setError(err instanceof Error ? err.message : 'Failed to load subscription plans')
+        console.error('Error loading data:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load subscription data')
       } finally {
         setPlansLoading(false)
       }
     }
 
-    loadPlans()
+    loadData()
   }, [])
 
   const handleSubscribe = async (planId: number) => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
     
     try {
-      await subscriptionApi.createSubscription({ plan_id: planId })
-      router.push('/dashboard')
+      if (currentSubscription) {
+        // Update existing subscription to new plan
+        const updated = await subscriptionApi.updateSubscription(currentSubscription.id, { plan_id: planId })
+        setCurrentSubscription(updated)
+        setSuccess('Plan changed successfully')
+      } else {
+        // Create new subscription
+        await subscriptionApi.createSubscription({ plan_id: planId })
+        router.push('/dashboard')
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create subscription')
+      setError(err instanceof Error ? err.message : 'Failed to update subscription')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUpdateSubscription = async (status: string) => {
+    if (!currentSubscription) return
+    
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      const updated = await subscriptionApi.updateSubscription(currentSubscription.id, { status })
+      setCurrentSubscription(updated)
+      setSuccess(`Subscription ${status} successfully`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update subscription')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCancelSubscription = async () => {
+    if (!currentSubscription) return
+    
+    if (!confirm('Are you sure you want to cancel your subscription? This action cannot be undone.')) {
+      return
+    }
+    
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      await subscriptionApi.cancelSubscription(currentSubscription.id)
+      setCurrentSubscription(null)
+      setSuccess('Subscription cancelled successfully')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel subscription')
+    } finally {
       setLoading(false)
     }
   }
@@ -106,14 +164,89 @@ export default function SubscriptionPage() {
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-slate-900 mb-4">
-            Choose Your Subscription
+            {currentSubscription ? 'Manage Your Subscription' : 'Choose Your Subscription'}
           </h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Select the perfect plan for your laundry needs. All plans include pickup, 
-            delivery, and professional care.
+            {currentSubscription 
+              ? 'Update your plan status or explore other subscription options.'
+              : 'Select the perfect plan for your laundry needs. All plans include pickup, delivery, and professional care.'
+            }
           </p>
         </div>
 
+        {/* Current Subscription Management */}
+        {currentSubscription && (
+          <div className="bg-white rounded-2xl p-8 shadow-lg max-w-3xl mx-auto mb-12">
+            <h2 className="text-2xl font-bold text-slate-900 mb-6">Current Subscription</h2>
+            
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <h3 className="font-semibold text-slate-800 mb-2">{currentSubscription.plan?.name}</h3>
+                <p className="text-slate-600 mb-4">${currentSubscription.plan?.price_per_month}/month</p>
+                <div className="flex items-center mb-4">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    currentSubscription.status === 'active' ? 'bg-emerald-100 text-emerald-800' :
+                    currentSubscription.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                    {currentSubscription.status.charAt(0).toUpperCase() + currentSubscription.status.slice(1)}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                {currentSubscription.status === 'active' && (
+                  <button
+                    onClick={() => handleUpdateSubscription('paused')}
+                    disabled={loading}
+                    className="w-full bg-yellow-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-yellow-600 transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Processing...' : 'Pause Subscription'}
+                  </button>
+                )}
+                
+                {currentSubscription.status === 'paused' && (
+                  <button
+                    onClick={() => handleUpdateSubscription('active')}
+                    disabled={loading}
+                    className="w-full bg-emerald-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-emerald-600 transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Processing...' : 'Resume Subscription'}
+                  </button>
+                )}
+                
+                <button
+                  onClick={handleCancelSubscription}
+                  disabled={loading}
+                  className="w-full bg-red-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-red-600 transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Processing...' : 'Cancel Subscription'}
+                </button>
+              </div>
+            </div>
+            
+            <div className="text-sm text-slate-600">
+              <p><strong>Period:</strong> {new Date(currentSubscription.current_period_start).toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })} to {new Date(currentSubscription.current_period_end).toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}</p>
+              <p><strong>Usage:</strong> {currentSubscription.pickups_used_this_period} of {currentSubscription.plan?.pickups_per_month} pickups used this period</p>
+            </div>
+          </div>
+        )}
+
+        {/* Success Message */}
+        {success && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-8 max-w-3xl mx-auto">
+            <p className="text-emerald-700 text-center">{success}</p>
+          </div>
+        )}
+        
         {/* Error Message */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8 max-w-3xl mx-auto">
@@ -168,14 +301,18 @@ export default function SubscriptionPage() {
 
                 <button
                   onClick={() => handleSubscribe(plan.id)}
-                  disabled={loading}
+                  disabled={loading || (currentSubscription?.plan_id === plan.id)}
                   className={`w-full py-4 rounded-xl font-semibold transition-all transform hover:scale-105 shadow-lg ${
-                    popular
+                    currentSubscription?.plan_id === plan.id
+                      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                      : popular
                       ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:from-teal-600 hover:to-emerald-600'
                       : 'bg-gradient-to-r from-slate-600 to-slate-700 text-white hover:from-slate-700 hover:to-slate-800'
                   } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {loading ? 'Processing...' : 'Select Plan'}
+                  {loading ? 'Processing...' : 
+                   currentSubscription?.plan_id === plan.id ? 'Current Plan' :
+                   currentSubscription ? 'Switch to Plan' : 'Select Plan'}
                 </button>
               </div>
             )
@@ -243,7 +380,7 @@ export default function SubscriptionPage() {
           <h2 className="text-2xl font-bold text-slate-900 mb-8">Frequently Asked Questions</h2>
           <div className="grid gap-6 max-w-3xl mx-auto text-left">
             <div className="bg-white rounded-lg p-6 shadow">
-              <h3 className="font-semibold text-slate-800 mb-2">What's included in a standard bag?</h3>
+              <h3 className="font-semibold text-slate-800 mb-2">What&apos;s included in a standard bag?</h3>
               <p className="text-slate-600 text-sm">
                 A standard bag holds approximately 15-20 lbs of laundry, equivalent to about 
                 2-3 loads in a home washing machine. Each bag is valued at $45 when purchased individually.

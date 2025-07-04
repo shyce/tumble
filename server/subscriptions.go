@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,7 +46,8 @@ type CreateSubscriptionRequest struct {
 }
 
 type UpdateSubscriptionRequest struct {
-	Status string `json:"status"` // active, paused, cancelled
+	Status string `json:"status,omitempty"` // active, paused, cancelled
+	PlanID *int   `json:"plan_id,omitempty"`
 }
 
 func NewSubscriptionHandler(db *sql.DB) *SubscriptionHandler {
@@ -262,19 +264,56 @@ func (h *SubscriptionHandler) handleUpdateSubscription(w http.ResponseWriter, r 
 		return
 	}
 
-	// Validate status
-	if req.Status != "active" && req.Status != "paused" && req.Status != "cancelled" {
+	// Validate status if provided
+	if req.Status != "" && req.Status != "active" && req.Status != "paused" && req.Status != "cancelled" {
 		http.Error(w, "Invalid status", http.StatusBadRequest)
 		return
 	}
 
+	// Validate plan if provided
+	if req.PlanID != nil {
+		var planExists bool
+		err = h.db.QueryRow(`
+			SELECT EXISTS(SELECT 1 FROM subscription_plans WHERE id = $1 AND is_active = true)`,
+			*req.PlanID,
+		).Scan(&planExists)
+		if err != nil || !planExists {
+			http.Error(w, "Invalid subscription plan", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Build update query dynamically
+	var updateQuery strings.Builder
+	var args []interface{}
+	argCount := 0
+
+	updateQuery.WriteString("UPDATE subscriptions SET ")
+
+	if req.Status != "" {
+		argCount++
+		updateQuery.WriteString(fmt.Sprintf("status = $%d, ", argCount))
+		args = append(args, req.Status)
+	}
+
+	if req.PlanID != nil {
+		argCount++
+		updateQuery.WriteString(fmt.Sprintf("plan_id = $%d, ", argCount))
+		args = append(args, *req.PlanID)
+	}
+
+	updateQuery.WriteString("updated_at = CURRENT_TIMESTAMP ")
+
+	argCount++
+	updateQuery.WriteString(fmt.Sprintf("WHERE id = $%d ", argCount))
+	args = append(args, subscriptionID)
+
+	argCount++
+	updateQuery.WriteString(fmt.Sprintf("AND user_id = $%d", argCount))
+	args = append(args, userID)
+
 	// Update subscription
-	result, err := h.db.Exec(`
-		UPDATE subscriptions 
-		SET status = $1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $2 AND user_id = $3`,
-		req.Status, subscriptionID, userID,
-	)
+	result, err := h.db.Exec(updateQuery.String(), args...)
 	if err != nil {
 		http.Error(w, "Failed to update subscription", http.StatusInternalServerError)
 		return

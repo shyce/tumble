@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Go build artifacts
+server/tmp/
+server/main
+
+# Go test artifacts  
+server/coverage*.out
+server/benchmark_results.txt
+
+# Node.js dependencies
+client/node_modules/
+
+# Next.js build artifacts
+client/.next/
+
+# VS Code symbols
+.vscode/symbols.json

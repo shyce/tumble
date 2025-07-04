@@ -32,14 +32,34 @@
 - [x] Document ports and endpoints
 - [x] Note: Nginx will be added later for production
 
-## Next Steps - Application Development
-- [ ] Design database schema for Tumble laundry service
-- [ ] Implement user authentication system
-- [ ] Create order management system
-- [ ] Build customer dashboard
-- [ ] Implement real-time order tracking
-- [ ] Add payment integration
-- [ ] Create admin panel for operations
-- [ ] Set up subscription management
+## Application Development
+- [x] Design database schema for Tumble laundry service
+- [x] Create database migrations for core tables
+- [x] Add Google OAuth support to authentication system
+- [x] Implement authentication API endpoints (login/register/OAuth)
+- [x] Set up NextAuth.js configuration and UI
+- [x] Add automatic database migration runner
+- [x] Add nginx reverse proxy to eliminate CORS issues
+- [x] Configure nginx routing (/api -> Go, / -> Next.js, /connection -> WebSocket)
+- [x] Update API URLs to use relative paths
+- [x] Test complete authentication flow (login/register working)
+
+## Frontend Development
+- [x] Create marketing homepage with Tumble branding
+- [x] Build customer dashboard UI (/dashboard)
+- [x] Create subscription selection page
+- [x] Build order history and tracking pages
+- [x] Add account settings and profile management
+
+## Backend API Development
+- [x] Create order management API endpoints
+- [x] Implement subscription management API
+- [x] Add real-time order tracking with Centrifuge
+- [ ] Create admin panel API endpoints
+- [ ] Add payment integration (Stripe)
+
+## Advanced Features
 - [ ] Add notification system (email/SMS)
 - [ ] Implement route optimization for pickups/deliveries
+- [ ] Create admin operations dashboard
+- [ ] Add driver mobile interface

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/centrifugal/centrifuge"
@@ -19,6 +20,12 @@ type Server struct {
 	db       *sql.DB
 	redis    *redis.Client
 	centNode *centrifuge.Node
+	realtime *RealtimeHandler
+	auth     *AuthHandler
+	orders   *OrderHandler
+	subscriptions *SubscriptionHandler
+	addresses *AddressHandler
+	services *ServiceHandler
 }
 
 type HealthResponse struct {
@@ -40,6 +47,11 @@ func main() {
 	}
 	defer server.db.Close()
 
+	// Run database migrations
+	if err := runMigrations(server.db); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+
 	// Initialize Redis connection
 	if err := server.initRedis(); err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
@@ -51,10 +63,69 @@ func main() {
 		log.Fatalf("Failed to initialize Centrifuge: %v", err)
 	}
 
+	// Initialize handlers
+	server.realtime = NewRealtimeHandler(server.db, server.centNode)
+	server.auth = NewAuthHandler(server.db)
+	server.orders = NewOrderHandler(server.db, server.realtime)
+	server.subscriptions = NewSubscriptionHandler(server.db)
+	server.addresses = NewAddressHandler(server.db)
+	server.services = NewServiceHandler(server.db)
+
 	// Set up HTTP routes
 	http.HandleFunc("/", server.handleHome)
 	http.HandleFunc("/health", server.handleHealth)
 	http.Handle("/connection/websocket", centrifuge.NewWebsocketHandler(server.centNode, centrifuge.WebsocketConfig{}))
+
+	// Auth routes
+	http.HandleFunc("/api/auth/register", server.auth.handleRegister)
+	http.HandleFunc("/api/auth/login", server.auth.handleLogin)
+	http.HandleFunc("/api/auth/google", server.auth.handleGoogleLogin)
+	http.HandleFunc("/api/auth/google/callback", server.auth.handleGoogleCallback)
+
+	// Order routes
+	http.HandleFunc("/api/orders", server.orders.handleGetOrders)
+	http.HandleFunc("/api/orders/create", server.orders.handleCreateOrder)
+	http.HandleFunc("/api/orders/", func(w http.ResponseWriter, r *http.Request) {
+		// Route to specific order handlers based on path
+		pathParts := strings.Split(r.URL.Path, "/")
+		if len(pathParts) >= 5 && pathParts[4] == "status" {
+			server.orders.handleUpdateOrderStatus(w, r)
+		} else if len(pathParts) >= 5 && pathParts[4] == "tracking" {
+			server.orders.handleGetOrderTracking(w, r)
+		} else {
+			server.orders.handleGetOrder(w, r)
+		}
+	})
+
+	// Subscription routes
+	http.HandleFunc("/api/subscriptions/plans", server.subscriptions.handleGetPlans)
+	http.HandleFunc("/api/subscriptions/current", server.subscriptions.handleGetSubscription)
+	http.HandleFunc("/api/subscriptions/create", server.subscriptions.handleCreateSubscription)
+	http.HandleFunc("/api/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage)
+	http.HandleFunc("/api/subscriptions/", func(w http.ResponseWriter, r *http.Request) {
+		// Route to specific subscription handlers based on path
+		pathParts := strings.Split(r.URL.Path, "/")
+		if len(pathParts) >= 5 && pathParts[4] == "cancel" {
+			server.subscriptions.handleCancelSubscription(w, r)
+		} else {
+			server.subscriptions.handleUpdateSubscription(w, r)
+		}
+	})
+
+	// Address routes
+	http.HandleFunc("/api/addresses", server.addresses.handleGetAddresses)
+	http.HandleFunc("/api/addresses/create", server.addresses.handleCreateAddress)
+	http.HandleFunc("/api/addresses/", func(w http.ResponseWriter, r *http.Request) {
+		// Route to specific address handlers based on method
+		if r.Method == http.MethodDelete {
+			server.addresses.handleDeleteAddress(w, r)
+		} else {
+			server.addresses.handleUpdateAddress(w, r)
+		}
+	})
+
+	// Service routes
+	http.HandleFunc("/api/services", server.services.handleGetServices)
 
 	// Start Centrifuge node
 	if err := server.centNode.Run(); err != nil {
@@ -109,7 +180,7 @@ func (s *Server) initCentrifuge() error {
 	node, err := centrifuge.New(centrifuge.Config{
 		LogLevel: centrifuge.LogLevelInfo,
 		LogHandler: func(entry centrifuge.LogEntry) {
-			log.Printf("[Centrifuge] %s: %v", entry.Level, entry.Message)
+			log.Printf("[Centrifuge] %v: %v", entry.Level, entry.Message)
 		},
 	})
 	if err != nil {
@@ -177,4 +248,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
+}
+
+// CORS middleware
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
 }

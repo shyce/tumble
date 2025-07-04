@@ -1,6 +1,16 @@
-version: '3.8'
-
 services:
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    ports:
+      - "3005:80"
+    depends_on:
+      - server
+      - client
+    networks:
+      - tumble_network
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -16,6 +26,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - tumble_network
 
   redis:
     image: redis:7-alpine
@@ -28,6 +40,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - tumble_network
 
   server:
     build:
@@ -45,11 +59,17 @@ services:
       DB_NAME: tumble
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      GOOGLE_CLIENT_ID: your-google-client-id
+      GOOGLE_CLIENT_SECRET: your-google-client-secret
+      FRONTEND_URL: http://localhost:3005
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - tumble_network
 
   client:
     build:
@@ -66,7 +86,13 @@ services:
       API_URL: http://server:8080
     depends_on:
       - server
+    networks:
+      - tumble_network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  tumble_network:
+    driver: bridge

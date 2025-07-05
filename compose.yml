@@ -63,6 +63,8 @@ services:
       GOOGLE_CLIENT_ID: your-google-client-id
       GOOGLE_CLIENT_SECRET: your-google-client-secret
       FRONTEND_URL: http://localhost:3005
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +86,11 @@ services:
     environment:
       NODE_ENV: development
       API_URL: http://server:8080
+      AUTH_SECRET: qG8/yMqJJGb4MJrf4sR1RWpjOTottFOr1SajSgeCmD0=
+      NEXTAUTH_SECRET: qG8/yMqJJGb4MJrf4sR1RWpjOTottFOr1SajSgeCmD0=
+      NEXTAUTH_URL: http://192.168.0.201:3005
+      GOOGLE_CLIENT_ID: your-google-client-id
+      GOOGLE_CLIENT_SECRET: your-google-client-secret
     depends_on:
       - server
     networks:

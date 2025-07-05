@@ -1,13 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Calendar, MapPin, Package, ArrowLeft, Sparkles, Plus, Minus } from 'lucide-react'
+import { Calendar, MapPin, Package, Plus, Minus, Crown, Loader2 } from 'lucide-react'
 import { addressApi, serviceApi, orderApi, subscriptionApi, Address, Service, OrderItem, SubscriptionUsage, CostCalculation } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 
 export default function SchedulePage() {
+  const { data: session, status } = useSession()
   const [addresses, setAddresses] = useState<Address[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [subscriptionUsage, setSubscriptionUsage] = useState<SubscriptionUsage | null>(null)
@@ -16,6 +19,7 @@ export default function SchedulePage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const router = useRouter()
+  const hasLoadedData = useRef(false)
 
   // Form state
   const [pickupAddressId, setPickupAddressId] = useState<number | null>(null)
@@ -27,9 +31,7 @@ export default function SchedulePage() {
   const [specialInstructions, setSpecialInstructions] = useState('')
   const [tip, setTip] = useState(0)
   const [customTip, setCustomTip] = useState('')
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([
-    { service_id: 1, quantity: 1, price: 45.00 } // Default to 1 standard bag
-  ])
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
 
   const timeSlots = [
     '8:00 AM - 12:00 PM',
@@ -38,50 +40,62 @@ export default function SchedulePage() {
   ]
 
   useEffect(() => {
-    const loadData = async () => {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        router.push('/auth/signin')
-        return
-      }
-
-      try {
-        // Load addresses, services, and subscription usage
-        const [addressData, servicesData, usageData] = await Promise.all([
-          addressApi.getAddresses(),
-          serviceApi.getServices(),
-          subscriptionApi.getSubscriptionUsage()
-        ])
-          
-        setAddresses(addressData)
-        setServices(servicesData)
-        setSubscriptionUsage(usageData)
-        
-        // Set default addresses if available
-        const defaultAddress = addressData.find((addr: Address) => addr.is_default)
-        if (defaultAddress) {
-          setPickupAddressId(defaultAddress.id)
-          setDeliveryAddressId(defaultAddress.id)
-        }
-
-        // Set default dates (tomorrow for pickup, day after for delivery)
-        const tomorrow = new Date()
-        tomorrow.setDate(tomorrow.getDate() + 1)
-        const dayAfter = new Date()
-        dayAfter.setDate(dayAfter.getDate() + 2)
-        
-        setPickupDate(tomorrow.toISOString().split('T')[0])
-        setDeliveryDate(dayAfter.toISOString().split('T')[0])
-
-      } catch {
-        setError('Failed to load data')
-      } finally {
-        setLoading(false)
-      }
+    if (status === 'loading') return
+    
+    if (!session?.user) {
+      router.push('/auth/signin')
+      return
     }
 
-    loadData()
-  }, [router])
+    // Only load data once when we have a valid session
+    if (!hasLoadedData.current && session) {
+      hasLoadedData.current = true
+      
+      const loadData = async () => {
+        try {
+          // Load addresses, services, and subscription usage
+          const [addressData, servicesData, usageData] = await Promise.all([
+            addressApi.getAddresses(session),
+            serviceApi.getServices(),
+            subscriptionApi.getSubscriptionUsage(session)
+          ])
+            
+          setAddresses(addressData)
+          setServices(servicesData)
+          setSubscriptionUsage(usageData)
+          
+          // Set default addresses if available
+          const defaultAddress = addressData.find((addr: Address) => addr.is_default)
+          if (defaultAddress) {
+            setPickupAddressId(defaultAddress.id)
+            setDeliveryAddressId(defaultAddress.id)
+          }
+
+          // Set default order item to standard bag service
+          const standardBagService = servicesData.find(s => s.name === 'standard_bag')
+          if (standardBagService) {
+            setOrderItems([{ service_id: standardBagService.id, quantity: 1, price: standardBagService.base_price }])
+          }
+
+          // Set default dates (tomorrow for pickup, day after for delivery)
+          const tomorrow = new Date()
+          tomorrow.setDate(tomorrow.getDate() + 1)
+          const dayAfter = new Date()
+          dayAfter.setDate(dayAfter.getDate() + 2)
+          
+          setPickupDate(tomorrow.toISOString().split('T')[0])
+          setDeliveryDate(dayAfter.toISOString().split('T')[0])
+
+        } catch {
+          setError('Failed to load data')
+        } finally {
+          setLoading(false)
+        }
+      }
+
+      loadData()
+    }
+  }, [status, router, session])
 
   const updateOrderItem = (index: number, updates: Partial<OrderItem>) => {
     setOrderItems(prev => prev.map((item, i) => 
@@ -90,7 +104,10 @@ export default function SchedulePage() {
   }
 
   const addOrderItem = () => {
-    setOrderItems(prev => [...prev, { service_id: 1, quantity: 1, price: 45.00 }])
+    const standardBagService = services.find(s => s.name === 'standard_bag')
+    if (standardBagService) {
+      setOrderItems(prev => [...prev, { service_id: standardBagService.id, quantity: 1, price: standardBagService.base_price }])
+    }
   }
 
   const removeOrderItem = (index: number) => {
@@ -100,14 +117,20 @@ export default function SchedulePage() {
   }
 
   const calculateCost = (): CostCalculation => {
-    const subtotal = orderItems.reduce((total, item) => total + (item.price * item.quantity), 0)
+    // Calculate pickup service cost ($10, covered if pickups remaining)
+    const pickupServiceCost = 10.0
+    const pickupCovered = subscriptionUsage && subscriptionUsage.pickups_remaining > 0
+    const pickupCharge = pickupCovered ? 0 : pickupServiceCost
     
-    // Calculate subscription benefits
-    let subscriptionDiscount = 0
+    // Calculate bag costs
+    const bagSubtotal = orderItems.reduce((total, item) => total + (item.price * item.quantity), 0)
+    
+    // Calculate subscription benefits for bags (separate from pickup coverage)
+    let bagSubscriptionDiscount = 0
     let coveredBags = 0
-    let hasSubscriptionBenefits = false
+    let hasSubscriptionBenefits = pickupCovered
     
-    if (subscriptionUsage && subscriptionUsage.pickups_remaining > 0) {
+    if (subscriptionUsage && subscriptionUsage.bags_remaining > 0) {
       // Find standard bags in the order
       const standardBagService = services.find(s => s.name === 'standard_bag')
       if (standardBagService) {
@@ -115,21 +138,26 @@ export default function SchedulePage() {
           services.find(s => s.id === item.service_id)?.name === 'standard_bag'
         )
         
-        coveredBags = standardBagItems.reduce((total, item) => total + item.quantity, 0)
+        const totalBagsInOrder = standardBagItems.reduce((total, item) => total + item.quantity, 0)
+        // Limit covered bags to what's actually remaining in subscription
+        coveredBags = Math.min(totalBagsInOrder, subscriptionUsage.bags_remaining)
+        
         if (coveredBags > 0) {
-          subscriptionDiscount = standardBagService.base_price * coveredBags
+          bagSubscriptionDiscount = standardBagService.base_price * coveredBags
           hasSubscriptionBenefits = true
         }
       }
     }
     
-    const finalSubtotal = Math.max(0, subtotal - subscriptionDiscount)
+    const totalSubscriptionDiscount = (pickupCovered ? pickupServiceCost : 0) + bagSubscriptionDiscount
+    const subtotalBeforeDiscount = pickupServiceCost + bagSubtotal
+    const finalSubtotal = Math.max(0, subtotalBeforeDiscount - totalSubscriptionDiscount)
     const tax = finalSubtotal * 0.08 // 8% tax
     const total = finalSubtotal + tax + tip
     
     return {
-      subtotal,
-      subscription_discount: subscriptionDiscount,
+      subtotal: subtotalBeforeDiscount,
+      subscription_discount: totalSubscriptionDiscount,
       final_subtotal: finalSubtotal,
       tax,
       tip,
@@ -147,14 +175,13 @@ export default function SchedulePage() {
     setError(null)
     setSuccess(null)
 
-    const token = localStorage.getItem('auth_token')
-    if (!token) {
+    if (!session?.user) {
       router.push('/auth/signin')
       return
     }
 
     try {
-      await orderApi.createOrder({
+      await orderApi.createOrder(session, {
         pickup_address_id: pickupAddressId!,
         delivery_address_id: deliveryAddressId!,
         pickup_date: pickupDate,
@@ -176,7 +203,7 @@ export default function SchedulePage() {
     }
   }
 
-  if (loading) {
+  if (loading || status === 'loading') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50 flex items-center justify-center">
         <div className="text-center">
@@ -188,47 +215,63 @@ export default function SchedulePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <Link href="/dashboard" className="flex items-center space-x-3">
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-emerald-400 rounded-xl flex items-center justify-center shadow-lg">
-                    <Sparkles className="text-white w-5 h-5" />
-                  </div>
-                  <span className="text-slate-800 font-bold text-xl tracking-tight">Tumble</span>
+    <Layout requireAuth={true} title="Schedule Pickup" subtitle="Choose your pickup and delivery details for your laundry service">
+      <div className="max-w-4xl mx-auto">
+        {/* Subscription Benefits Banner */}
+        {subscriptionUsage && (
+          <div className={`mb-8 border rounded-lg p-4 ${
+            subscriptionUsage.pickups_remaining > 0 || subscriptionUsage.bags_remaining > 0
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-orange-50 border-orange-200'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <Crown className={`w-5 h-5 mr-3 ${
+                  subscriptionUsage.pickups_remaining > 0 || subscriptionUsage.bags_remaining > 0
+                    ? 'text-emerald-600'
+                    : 'text-orange-600'
+                }`} />
+                <div>
+                  <p className={`font-semibold ${
+                    subscriptionUsage.pickups_remaining > 0 || subscriptionUsage.bags_remaining > 0
+                      ? 'text-emerald-800'
+                      : 'text-orange-800'
+                  }`}>
+                    Subscription Active
+                  </p>
+                  <p className={`text-xs ${
+                    subscriptionUsage.pickups_remaining > 0 || subscriptionUsage.bags_remaining > 0
+                      ? 'text-emerald-600'
+                      : 'text-orange-600'
+                  }`}>
+                    {subscriptionUsage.pickups_remaining > 0 || subscriptionUsage.bags_remaining > 0
+                      ? 'Benefits available for this period'
+                      : 'No benefits remaining this period'
+                    }
+                  </p>
                 </div>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-slate-900 mb-4">Schedule Pickup</h1>
-          <p className="text-lg text-slate-600">
-            Choose your pickup and delivery details for your laundry service
-          </p>
-          
-          {/* Subscription Benefits Banner */}
-          {subscriptionUsage && subscriptionUsage.pickups_remaining > 0 && (
-            <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-lg p-4 max-w-2xl mx-auto">
-              <div className="flex items-center justify-center text-emerald-700">
-                <span className="text-2xl mr-2">🎉</span>
-                <div className="text-left">
-                  <p className="font-semibold">Great! You have {subscriptionUsage.pickups_remaining} pickup{subscriptionUsage.pickups_remaining !== 1 ? 's' : ''} remaining</p>
-                  <p className="text-sm">Standard bags will be covered by your subscription</p>
+              </div>
+              <div className="flex space-x-6 text-center">
+                <div>
+                  <div className={`text-lg font-bold ${
+                    subscriptionUsage.pickups_remaining > 0 ? 'text-emerald-600' : 'text-slate-500'
+                  }`}>
+                    {subscriptionUsage.pickups_remaining}
+                  </div>
+                  <div className="text-xs text-slate-600">Pickups Left</div>
+                </div>
+                <div>
+                  <div className={`text-lg font-bold ${
+                    subscriptionUsage.bags_remaining > 0 ? 'text-teal-600' : 'text-slate-500'
+                  }`}>
+                    {subscriptionUsage.bags_remaining}
+                  </div>
+                  <div className="text-xs text-slate-600">Bags Covered</div>
                 </div>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Success/Error Messages */}
         {success && (
@@ -399,7 +442,7 @@ export default function SchedulePage() {
                     }}
                     className="flex-1 p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-slate-900 bg-white"
                   >
-                    {services.map(service => (
+                    {services.filter(service => service.name !== 'pickup_service').map(service => (
                       <option key={service.id} value={service.id}>
                         {service.description} - ${service.base_price}
                       </option>
@@ -450,7 +493,25 @@ export default function SchedulePage() {
 
               <div className="bg-slate-50 rounded-lg p-4">
                 <div className="space-y-2">
+                  {/* Show pickup service cost */}
                   <div className="flex justify-between text-slate-700">
+                    <span>Pickup Service:</span>
+                    <span>
+                      {subscriptionUsage && subscriptionUsage.pickups_remaining > 0 ? (
+                        <span className="text-emerald-600">Covered</span>
+                      ) : (
+                        <span>$10.00</span>
+                      )}
+                    </span>
+                  </div>
+                  
+                  {/* Show bag services */}
+                  <div className="flex justify-between text-slate-700">
+                    <span>Bag Services:</span>
+                    <span>${(costCalculation.subtotal - 10).toFixed(2)}</span>
+                  </div>
+                  
+                  <div className="flex justify-between text-slate-700 border-t border-slate-300 pt-2">
                     <span>Subtotal:</span>
                     <span>${costCalculation.subtotal.toFixed(2)}</span>
                   </div>
@@ -458,7 +519,10 @@ export default function SchedulePage() {
                   {costCalculation.has_subscription_benefits && (
                     <>
                       <div className="flex justify-between text-emerald-600">
-                        <span>Subscription Discount ({costCalculation.covered_bags} bags covered):</span>
+                        <span>
+                          Subscription Benefits 
+                          {costCalculation.covered_bags > 0 && ` (${costCalculation.covered_bags} bags covered)`}:
+                        </span>
                         <span>-${costCalculation.subscription_discount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-slate-700">
@@ -488,9 +552,8 @@ export default function SchedulePage() {
                   </div>
                   
                   {subscriptionUsage && (
-                    <div className="text-sm text-slate-600 mt-3">
-                      <p>📦 Pickups remaining this period: {subscriptionUsage.pickups_remaining} of {subscriptionUsage.pickups_allowed}</p>
-                      <p>📅 Period: {new Date(subscriptionUsage.current_period_start).toLocaleDateString()} - {new Date(subscriptionUsage.current_period_end).toLocaleDateString()}</p>
+                    <div className="text-xs text-slate-500 mt-3 text-center">
+                      <p>📅 Billing period: {new Date(subscriptionUsage.current_period_start).toLocaleDateString()} - {new Date(subscriptionUsage.current_period_end).toLocaleDateString()}</p>
                     </div>
                   )}
                 </div>
@@ -621,13 +684,18 @@ export default function SchedulePage() {
             <button
               type="submit"
               disabled={submitting || addresses.length === 0}
-              className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
-              {submitting ? 'Scheduling...' : 'Schedule Pickup'}
+              <div className="flex items-center justify-center">
+                {submitting && (
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                )}
+                {submitting ? 'Scheduling...' : 'Schedule Pickup'}
+              </div>
             </button>
           </div>
         </form>
       </div>
-    </div>
+    </Layout>
   )
 }

@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { 
-  Sparkles, ArrowLeft, User, Mail, Phone, MapPin, Bell, Shield, 
+  User, Mail, Phone, MapPin, Bell, Shield, 
   Save, CheckCircle, Plus, Edit, Trash2, Home, Building2 
 } from 'lucide-react'
 import { addressApi, Address, CreateAddressRequest, UpdateAddressRequest } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 interface UserProfile {
   id: number
@@ -18,6 +19,7 @@ interface UserProfile {
 }
 
 export default function SettingsPage() {
+  const { data: session, status } = useSession()
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -43,26 +45,31 @@ export default function SettingsPage() {
   })
 
   useEffect(() => {
-    // Load user data from localStorage
-    const userData = localStorage.getItem('user')
-    if (userData) {
-      const user = JSON.parse(userData)
-      setProfile({
-        id: user.id || 1,
-        email: user.email || '',
-        firstName: user.first_name || '',
-        lastName: user.last_name || '',
-        phone: user.phone || ''
-      })
+    if (status === 'loading') return
+    
+    if (!session?.user) {
+      router.push('/auth/signin')
+      return
     }
+
+    // Load user data from session
+    const user = session.user as any
+    setProfile({
+      id: user.id || 1,
+      email: user.email || '',
+      firstName: user.first_name || user.name?.split(' ')[0] || '',
+      lastName: user.last_name || user.name?.split(' ')[1] || '',
+      phone: user.phone || ''
+    })
 
     // Load addresses
     loadAddresses()
-  }, [])
+  }, [session, status, router])
 
   const loadAddresses = async () => {
+    if (!session) return
     try {
-      const addressData = await addressApi.getAddresses()
+      const addressData = await addressApi.getAddresses(session)
       setAddresses(addressData)
     } catch (error) {
       console.error('Failed to load addresses:', error)
@@ -88,13 +95,13 @@ export default function SettingsPage() {
     try {
       if (editingAddress) {
         // Update existing address
-        const updatedAddress = await addressApi.updateAddress(editingAddress.id, addressForm)
+        const updatedAddress = await addressApi.updateAddress(session, editingAddress.id, addressForm)
         setAddresses(prev => prev.map(addr => 
           addr.id === editingAddress.id ? updatedAddress : addr
         ))
       } else {
         // Create new address
-        const newAddress = await addressApi.createAddress(addressForm)
+        const newAddress = await addressApi.createAddress(session, addressForm)
         setAddresses(prev => [...prev, newAddress])
       }
 
@@ -140,7 +147,7 @@ export default function SettingsPage() {
     }
 
     try {
-      await addressApi.deleteAddress(addressId)
+      await addressApi.deleteAddress(session, addressId)
       setAddresses(prev => prev.filter(addr => addr.id !== addressId))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -152,7 +159,7 @@ export default function SettingsPage() {
 
   const handleSetDefault = async (addressId: number) => {
     try {
-      await addressApi.updateAddress(addressId, { is_default: true })
+      await addressApi.updateAddress(session, addressId, { is_default: true })
       // Reload addresses to get updated default status
       await loadAddresses()
       setSaved(true)
@@ -177,33 +184,17 @@ export default function SettingsPage() {
     })
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <Link href="/dashboard" className="flex items-center space-x-3">
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-emerald-400 rounded-xl flex items-center justify-center shadow-lg">
-                    <Sparkles className="text-white w-5 h-5" />
-                  </div>
-                  <span className="text-slate-800 font-bold text-xl tracking-tight">Tumble</span>
-                </div>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-teal-500"></div>
+      </div>
+    )
+  }
 
-      <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-slate-900 mb-2">Account Settings</h1>
-          <p className="text-lg text-slate-600">Manage your profile and addresses</p>
-        </div>
+  return (
+    <Layout requireAuth={true} title="Account Settings" subtitle="Manage your profile and addresses">
+      <div className="max-w-4xl mx-auto">
 
         {/* Success Message */}
         {saved && (
@@ -533,6 +524,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </div>
+    </Layout>
   )
 }

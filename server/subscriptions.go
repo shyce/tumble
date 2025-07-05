@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type SubscriptionHandler struct {
@@ -16,29 +18,27 @@ type SubscriptionHandler struct {
 }
 
 type SubscriptionPlan struct {
-	ID                  int     `json:"id"`
-	Name                string  `json:"name"`
-	Description         string  `json:"description"`
-	PricePerMonth       float64 `json:"price_per_month"`
-	PoundsIncluded      int     `json:"pounds_included"`
-	PricePerExtraPound  float64 `json:"price_per_extra_pound"`
-	PickupsPerMonth     int     `json:"pickups_per_month"`
-	IsActive            bool    `json:"is_active"`
+	ID                 int     `json:"id"`
+	Name               string  `json:"name"`
+	Description        string  `json:"description"`
+	PricePerMonth      float64 `json:"price_per_month"`
+	PoundsIncluded     int     `json:"pounds_included"`
+	PricePerExtraPound float64 `json:"price_per_extra_pound"`
+	PickupsPerMonth    int     `json:"pickups_per_month"`
+	IsActive           bool    `json:"is_active"`
 }
 
 type Subscription struct {
-	ID                    int              `json:"id"`
-	UserID                int              `json:"user_id"`
-	PlanID                int              `json:"plan_id"`
-	Plan                  *SubscriptionPlan `json:"plan,omitempty"`
-	Status                string           `json:"status"`
-	CurrentPeriodStart    string           `json:"current_period_start"`
-	CurrentPeriodEnd      string           `json:"current_period_end"`
-	PoundsUsedThisPeriod  int              `json:"pounds_used_this_period"`
-	PickupsUsedThisPeriod int              `json:"pickups_used_this_period"`
-	StripeSubscriptionID  *string          `json:"stripe_subscription_id,omitempty"`
-	CreatedAt             time.Time        `json:"created_at"`
-	UpdatedAt             time.Time        `json:"updated_at"`
+	ID                   int               `json:"id"`
+	UserID               int               `json:"user_id"`
+	PlanID               int               `json:"plan_id"`
+	Plan                 *SubscriptionPlan `json:"plan,omitempty"`
+	Status               string            `json:"status"`
+	CurrentPeriodStart   string            `json:"current_period_start"`
+	CurrentPeriodEnd     string            `json:"current_period_end"`
+	StripeSubscriptionID *string           `json:"stripe_subscription_id,omitempty"`
+	CreatedAt            time.Time         `json:"created_at"`
+	UpdatedAt            time.Time         `json:"updated_at"`
 }
 
 type CreateSubscriptionRequest struct {
@@ -112,11 +112,10 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 
 	var subscription Subscription
 	var plan SubscriptionPlan
-	
+
 	err = h.db.QueryRow(`
 		SELECT s.id, s.user_id, s.plan_id, s.status,
 			   s.current_period_start, s.current_period_end,
-			   s.pounds_used_this_period, s.pickups_used_this_period,
 			   s.stripe_subscription_id, s.created_at, s.updated_at,
 			   p.id, p.name, p.description, p.price_per_month,
 			   p.pounds_included, p.price_per_extra_pound, p.pickups_per_month
@@ -129,8 +128,7 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 	).Scan(
 		&subscription.ID, &subscription.UserID, &subscription.PlanID,
 		&subscription.Status, &subscription.CurrentPeriodStart,
-		&subscription.CurrentPeriodEnd, &subscription.PoundsUsedThisPeriod,
-		&subscription.PickupsUsedThisPeriod, &subscription.StripeSubscriptionID,
+		&subscription.CurrentPeriodEnd, &subscription.StripeSubscriptionID, 
 		&subscription.CreatedAt, &subscription.UpdatedAt,
 		&plan.ID, &plan.Name, &plan.Description, &plan.PricePerMonth,
 		&plan.PoundsIncluded, &plan.PricePerExtraPound, &plan.PickupsPerMonth,
@@ -208,12 +206,11 @@ func (h *SubscriptionHandler) handleCreateSubscription(w http.ResponseWriter, r 
 	err = h.db.QueryRow(`
 		INSERT INTO subscriptions (
 			user_id, plan_id, status, 
-			current_period_start, current_period_end,
-			pounds_used_this_period, pickups_used_this_period
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			current_period_start, current_period_end
+		) VALUES ($1, $2, $3, $4, $5)
 		RETURNING id`,
 		userID, req.PlanID, "active",
-		periodStart, periodEnd, 0, 0,
+		periodStart, periodEnd,
 	).Scan(&subscriptionID)
 	if err != nil {
 		http.Error(w, "Failed to create subscription", http.StatusInternalServerError)
@@ -239,13 +236,8 @@ func (h *SubscriptionHandler) handleUpdateSubscription(w http.ResponseWriter, r 
 	}
 
 	// Get subscription ID from URL
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 4 {
-		http.Error(w, "Invalid subscription ID", http.StatusBadRequest)
-		return
-	}
-
-	subscriptionID, err := strconv.Atoi(pathParts[3])
+	vars := mux.Vars(r)
+	subscriptionID, err := strconv.Atoi(vars["id"])
 	if err != nil {
 		http.Error(w, "Invalid subscription ID", http.StatusBadRequest)
 		return
@@ -344,13 +336,8 @@ func (h *SubscriptionHandler) handleCancelSubscription(w http.ResponseWriter, r 
 	}
 
 	// Get subscription ID from URL
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 5 || pathParts[4] != "cancel" {
-		http.Error(w, "Invalid endpoint", http.StatusBadRequest)
-		return
-	}
-
-	subscriptionID, err := strconv.Atoi(pathParts[3])
+	vars := mux.Vars(r)
+	subscriptionID, err := strconv.Atoi(vars["id"])
 	if err != nil {
 		http.Error(w, "Invalid subscription ID", http.StatusBadRequest)
 		return
@@ -392,11 +379,10 @@ func (h *SubscriptionHandler) handleCancelSubscription(w http.ResponseWriter, r 
 func (h *SubscriptionHandler) getSubscriptionByID(subscriptionID int) (*Subscription, error) {
 	var subscription Subscription
 	var plan SubscriptionPlan
-	
+
 	err := h.db.QueryRow(`
 		SELECT s.id, s.user_id, s.plan_id, s.status,
 			   s.current_period_start, s.current_period_end,
-			   s.pounds_used_this_period, s.pickups_used_this_period,
 			   s.stripe_subscription_id, s.created_at, s.updated_at,
 			   p.id, p.name, p.description, p.price_per_month,
 			   p.pounds_included, p.price_per_extra_pound, p.pickups_per_month
@@ -407,17 +393,16 @@ func (h *SubscriptionHandler) getSubscriptionByID(subscriptionID int) (*Subscrip
 	).Scan(
 		&subscription.ID, &subscription.UserID, &subscription.PlanID,
 		&subscription.Status, &subscription.CurrentPeriodStart,
-		&subscription.CurrentPeriodEnd, &subscription.PoundsUsedThisPeriod,
-		&subscription.PickupsUsedThisPeriod, &subscription.StripeSubscriptionID,
+		&subscription.CurrentPeriodEnd, &subscription.StripeSubscriptionID,
 		&subscription.CreatedAt, &subscription.UpdatedAt,
 		&plan.ID, &plan.Name, &plan.Description, &plan.PricePerMonth,
 		&plan.PoundsIncluded, &plan.PricePerExtraPound, &plan.PickupsPerMonth,
 	)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	subscription.Plan = &plan
 	return &subscription, nil
 }
@@ -441,7 +426,7 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 	var planID int
 	var pickupsPerMonth int
 	var currentPeriodStart, currentPeriodEnd string
-	
+
 	err = h.db.QueryRow(`
 		SELECT s.id, s.plan_id, s.current_period_start, s.current_period_end, p.pickups_per_month
 		FROM subscriptions s
@@ -451,7 +436,7 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 		LIMIT 1`,
 		userID,
 	).Scan(&subscriptionID, &planID, &currentPeriodStart, &currentPeriodEnd, &pickupsPerMonth)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "No active subscription found", http.StatusNotFound)
@@ -463,9 +448,11 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 
 	// Count orders in current period
 	var ordersCount int
-	var totalBags int
+	var coveredBags int
 	err = h.db.QueryRow(`
-		SELECT COUNT(DISTINCT o.id), COALESCE(SUM(oi.quantity), 0)
+		SELECT 
+			COUNT(DISTINCT o.id), 
+			COALESCE(SUM(CASE WHEN oi.price = 0 AND s.name = 'standard_bag' THEN oi.quantity ELSE 0 END), 0)
 		FROM orders o
 		LEFT JOIN order_items oi ON o.id = oi.order_id
 		LEFT JOIN services s ON oi.service_id = s.id
@@ -473,14 +460,24 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 		AND o.subscription_id = $2
 		AND o.pickup_date >= $3::date 
 		AND o.pickup_date < $4::date
-		AND o.status != 'cancelled'
-		AND s.name IN ('standard_bag', 'rush_bag')`,
+		AND o.status != 'cancelled'`,
 		userID, subscriptionID, currentPeriodStart, currentPeriodEnd,
-	).Scan(&ordersCount, &totalBags)
-	
+	).Scan(&ordersCount, &coveredBags)
+
 	if err != nil {
 		http.Error(w, "Failed to fetch usage data", http.StatusInternalServerError)
 		return
+	}
+
+	// Calculate remaining values, ensuring they never go below 0
+	pickupsRemaining := pickupsPerMonth - ordersCount
+	if pickupsRemaining < 0 {
+		pickupsRemaining = 0
+	}
+	
+	bagsRemaining := pickupsPerMonth - coveredBags
+	if bagsRemaining < 0 {
+		bagsRemaining = 0
 	}
 
 	usage := map[string]interface{}{
@@ -489,10 +486,10 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 		"current_period_end":   currentPeriodEnd,
 		"pickups_used":         ordersCount,
 		"pickups_allowed":      pickupsPerMonth,
-		"pickups_remaining":    pickupsPerMonth - ordersCount,
-		"bags_used":            totalBags,
-		"bags_allowed":         pickupsPerMonth,
-		"bags_remaining":       pickupsPerMonth - totalBags,
+		"pickups_remaining":    pickupsRemaining,
+		"bags_used":            coveredBags,
+		"bags_allowed":         pickupsPerMonth,             // Total bags allowed per month
+		"bags_remaining":       bagsRemaining, // Remaining bags = total allowed - bags covered (min 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

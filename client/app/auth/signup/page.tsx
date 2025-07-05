@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { authApi } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 export default function SignUp() {
   const [formData, setFormData] = useState({
@@ -23,19 +24,38 @@ export default function SignUp() {
     setError('')
 
     try {
-      const result = await authApi.register({
-        email: formData.email,
-        password: formData.password,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        phone: formData.phone,
+      // First register the user
+      const response = await fetch('/api/v1/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          phone: formData.phone,
+        }),
       })
 
-      // Store token in localStorage for now (in production, use httpOnly cookies)
-      localStorage.setItem('auth_token', result.token)
-      localStorage.setItem('user', JSON.stringify(result.user))
-      
-      router.push('/dashboard')
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || 'Registration failed')
+      }
+
+      // After successful registration, sign in with NextAuth
+      const result = await signIn('credentials', {
+        email: formData.email,
+        password: formData.password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        setError('Registration successful but sign in failed. Please try signing in.')
+      } else {
+        router.push('/dashboard')
+      }
     } catch (error: any) {
       setError(error.message || 'An error occurred. Please try again.')
     } finally {
@@ -44,7 +64,7 @@ export default function SignUp() {
   }
 
   const handleGoogleSignIn = () => {
-    window.location.href = authApi.getGoogleAuthUrl()
+    signIn('google', { callbackUrl: '/dashboard' })
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -55,16 +75,9 @@ export default function SignUp() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Join Tumble
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Get started with your laundry service
-          </p>
-        </div>
+    <Layout requireAuth={false} title="Join Tumble" subtitle="Get started with your laundry service">
+      <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -179,7 +192,8 @@ export default function SignUp() {
             </span>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </Layout>
   )
 }

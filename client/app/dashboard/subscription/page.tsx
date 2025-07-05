@@ -2,11 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { Sparkles, Calendar, CheckCircle, ArrowLeft, Package } from 'lucide-react'
-import { subscriptionApi, SubscriptionPlan, Subscription } from '@/lib/api'
+import { SubscriptionPlan, Subscription } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 export default function SubscriptionPage() {
+  const { data: session, status } = useSession()
   const [plans, setPlans] = useState<SubscriptionPlan[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(false)
@@ -17,28 +20,60 @@ export default function SubscriptionPage() {
 
   // Load subscription plans and current subscription
   useEffect(() => {
+    if (status === 'loading') return
+    
     const loadData = async () => {
       try {
-        // Load plans and current subscription in parallel
-        const [fetchedPlans, currentSub] = await Promise.all([
-          subscriptionApi.getPlans(),
-          subscriptionApi.getCurrentSubscription()
-        ])
+        // Load plans first (this should always work - no auth required)
+        const plansResponse = await fetch('/api/v1/subscriptions/plans')
+        if (plansResponse.ok) {
+          const fetchedPlans = await plansResponse.json()
+          setPlans(fetchedPlans)
+        } else {
+          throw new Error('Failed to fetch subscription plans')
+        }
         
-        setPlans(fetchedPlans)
-        setCurrentSubscription(currentSub)
+        // Then try to load current subscription if user is logged in
+        if (session?.user) {
+          try {
+            const subResponse = await fetch('/api/v1/subscriptions/current', {
+              headers: {
+                'Authorization': `Bearer ${(session as any)?.accessToken}`,
+              },
+            })
+            
+            if (subResponse.ok) {
+              const currentSub = await subResponse.json()
+              setCurrentSubscription(currentSub)
+            } else if (subResponse.status === 404) {
+              // No subscription found, which is fine
+              setCurrentSubscription(null)
+            } else {
+              console.log('Error fetching current subscription:', subResponse.status)
+            }
+          } catch (subError) {
+            // It's okay if there's no current subscription, just log it
+            console.log('No current subscription found:', subError)
+            setCurrentSubscription(null)
+          }
+        }
       } catch (err) {
-        console.error('Error loading data:', err)
-        setError(err instanceof Error ? err.message : 'Failed to load subscription data')
+        console.error('Error loading subscription plans:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load subscription plans')
       } finally {
         setPlansLoading(false)
       }
     }
 
     loadData()
-  }, [])
+  }, [session, status])
 
   const handleSubscribe = async (planId: number) => {
+    if (!session?.user) {
+      setError('You must be logged in to subscribe')
+      return
+    }
+    
     setLoading(true)
     setError(null)
     setSuccess(null)
@@ -46,13 +81,38 @@ export default function SubscriptionPage() {
     try {
       if (currentSubscription) {
         // Update existing subscription to new plan
-        const updated = await subscriptionApi.updateSubscription(currentSubscription.id, { plan_id: planId })
-        setCurrentSubscription(updated)
-        setSuccess('Plan changed successfully')
+        const response = await fetch(`/api/v1/subscriptions/${currentSubscription.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(session as any)?.accessToken}`,
+          },
+          body: JSON.stringify({ plan_id: planId }),
+        })
+        
+        if (response.ok) {
+          const updated = await response.json()
+          setCurrentSubscription(updated)
+          setSuccess('Plan changed successfully')
+        } else {
+          throw new Error('Failed to update subscription plan')
+        }
       } else {
         // Create new subscription
-        await subscriptionApi.createSubscription({ plan_id: planId })
-        router.push('/dashboard')
+        const response = await fetch('/api/v1/subscriptions/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(session as any)?.accessToken}`,
+          },
+          body: JSON.stringify({ plan_id: planId }),
+        })
+        
+        if (response.ok) {
+          router.push('/dashboard')
+        } else {
+          throw new Error('Failed to create subscription')
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription')
@@ -62,16 +122,29 @@ export default function SubscriptionPage() {
   }
 
   const handleUpdateSubscription = async (status: string) => {
-    if (!currentSubscription) return
+    if (!currentSubscription || !session?.user) return
     
     setLoading(true)
     setError(null)
     setSuccess(null)
     
     try {
-      const updated = await subscriptionApi.updateSubscription(currentSubscription.id, { status })
-      setCurrentSubscription(updated)
-      setSuccess(`Subscription ${status} successfully`)
+      const response = await fetch(`/api/v1/subscriptions/${currentSubscription.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(session as any)?.accessToken}`,
+        },
+        body: JSON.stringify({ status }),
+      })
+      
+      if (response.ok) {
+        const updated = await response.json()
+        setCurrentSubscription(updated)
+        setSuccess(`Subscription ${status} successfully`)
+      } else {
+        throw new Error('Failed to update subscription status')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription')
     } finally {
@@ -80,7 +153,7 @@ export default function SubscriptionPage() {
   }
 
   const handleCancelSubscription = async () => {
-    if (!currentSubscription) return
+    if (!currentSubscription || !session?.user) return
     
     if (!confirm('Are you sure you want to cancel your subscription? This action cannot be undone.')) {
       return
@@ -91,9 +164,19 @@ export default function SubscriptionPage() {
     setSuccess(null)
     
     try {
-      await subscriptionApi.cancelSubscription(currentSubscription.id)
-      setCurrentSubscription(null)
-      setSuccess('Subscription cancelled successfully')
+      const response = await fetch(`/api/v1/subscriptions/${currentSubscription.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${(session as any)?.accessToken}`,
+        },
+      })
+      
+      if (response.ok) {
+        setCurrentSubscription(null)
+        setSuccess('Subscription cancelled successfully')
+      } else {
+        throw new Error('Failed to cancel subscription')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel subscription')
     } finally {
@@ -130,49 +213,26 @@ export default function SubscriptionPage() {
 
   if (plansLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading subscription plans...</p>
+      <Layout requireAuth={true} title="Subscription Plans" subtitle="Loading your subscription options...">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mx-auto mb-4"></div>
+            <p className="text-slate-600">Loading subscription plans...</p>
+          </div>
         </div>
-      </div>
+      </Layout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <Link href="/dashboard" className="flex items-center space-x-3">
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-emerald-400 rounded-xl flex items-center justify-center shadow-lg">
-                    <Sparkles className="text-white w-5 h-5" />
-                  </div>
-                  <span className="text-slate-800 font-bold text-xl tracking-tight">Tumble</span>
-                </div>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-slate-900 mb-4">
-            {currentSubscription ? 'Manage Your Subscription' : 'Choose Your Subscription'}
-          </h1>
-          <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            {currentSubscription 
-              ? 'Update your plan status or explore other subscription options.'
-              : 'Select the perfect plan for your laundry needs. All plans include pickup, delivery, and professional care.'
-            }
-          </p>
-        </div>
+    <Layout 
+      requireAuth={true} 
+      title={currentSubscription ? 'Manage Your Subscription' : 'Choose Your Subscription'}
+      subtitle={currentSubscription 
+        ? 'Update your plan status or explore other subscription options.'
+        : 'Select the perfect plan for your laundry needs. All plans include pickup, delivery, and professional care.'
+      }
+    >
 
         {/* Current Subscription Management */}
         {currentSubscription && (
@@ -402,7 +462,6 @@ export default function SubscriptionPage() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Layout>
   )
 }

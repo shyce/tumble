@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type RealtimeInterface interface {
@@ -102,20 +103,19 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Check for active subscription and apply benefits
+	// Check for active subscription and calculate current usage dynamically
 	var subscriptionID *int
 	var pickupsUsed, pickupsAllowed int
+	var bagsUsed, bagsAllowed int
 	var subscription struct {
-		ID                    int
-		PickupsPerMonth      int
-		PickupsUsedThisPeriod int
-		CurrentPeriodStart    string
-		CurrentPeriodEnd      string
+		ID                 int
+		PickupsPerMonth    int
+		CurrentPeriodStart string
+		CurrentPeriodEnd   string
 	}
 	
 	err = h.db.QueryRow(`
-		SELECT s.id, p.pickups_per_month, s.pickups_used_this_period,
-			   s.current_period_start, s.current_period_end
+		SELECT s.id, p.pickups_per_month, s.current_period_start, s.current_period_end
 		FROM subscriptions s
 		JOIN subscription_plans p ON s.plan_id = p.id
 		WHERE s.user_id = $1 AND s.status = 'active'
@@ -123,47 +123,52 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		LIMIT 1`,
 		userID,
 	).Scan(&subscription.ID, &subscription.PickupsPerMonth, 
-		&subscription.PickupsUsedThisPeriod, &subscription.CurrentPeriodStart,
-		&subscription.CurrentPeriodEnd)
+		&subscription.CurrentPeriodStart, &subscription.CurrentPeriodEnd)
 	
 	if err == nil {
-		// User has active subscription
+		// User has active subscription - calculate current usage dynamically
 		subscriptionID = &subscription.ID
-		pickupsUsed = subscription.PickupsUsedThisPeriod
 		pickupsAllowed = subscription.PickupsPerMonth
-	}
-	
-	// Calculate totals with subscription benefits
-	var subtotal float64
-	var standardBagCount int
-	
-	for _, item := range req.Items {
-		// Count standard bags for subscription benefits
-		var serviceName string
-		h.db.QueryRow("SELECT name FROM services WHERE id = $1", item.ServiceID).Scan(&serviceName)
+		bagsAllowed = subscription.PickupsPerMonth // Same as pickups in current plans
 		
-		if serviceName == "standard_bag" {
-			standardBagCount += item.Quantity
+		// Count actual pickups (orders) in current period
+		err = h.db.QueryRow(`
+			SELECT COUNT(DISTINCT o.id)
+			FROM orders o
+			WHERE o.user_id = $1 
+			AND o.subscription_id = $2
+			AND o.pickup_date >= $3::date 
+			AND o.pickup_date < $4::date
+			AND o.status != 'cancelled'`,
+			userID, subscription.ID, subscription.CurrentPeriodStart, subscription.CurrentPeriodEnd,
+		).Scan(&pickupsUsed)
+		
+		if err != nil {
+			pickupsUsed = 0 // Default to 0 if query fails
 		}
 		
-		subtotal += item.Price * float64(item.Quantity)
-	}
-	
-	// Apply subscription discount if applicable
-	if subscriptionID != nil && pickupsUsed < pickupsAllowed {
-		// User has pickup remaining in subscription
-		// Standard bags are covered, only charge for extras
-		if standardBagCount > 0 {
-			// Remove cost of standard bags covered by subscription
-			var standardBagPrice float64
-			h.db.QueryRow("SELECT base_price FROM services WHERE name = 'standard_bag'").Scan(&standardBagPrice)
-			subtotal -= standardBagPrice * float64(standardBagCount)
+		// Count actual standard bags covered by subscription in current period
+		// Only count bags that were covered (price = 0)
+		err = h.db.QueryRow(`
+			SELECT COALESCE(SUM(oi.quantity), 0)
+			FROM orders o
+			JOIN order_items oi ON o.id = oi.order_id
+			JOIN services s ON oi.service_id = s.id
+			WHERE o.user_id = $1 
+			AND o.subscription_id = $2
+			AND o.pickup_date >= $3::date 
+			AND o.pickup_date < $4::date
+			AND o.status != 'cancelled'
+			AND s.name = 'standard_bag'
+			AND oi.price = 0`,
+			userID, subscription.ID, subscription.CurrentPeriodStart, subscription.CurrentPeriodEnd,
+		).Scan(&bagsUsed)
+		
+		if err != nil {
+			bagsUsed = 0 // Default to 0 if query fails
 		}
 	}
 	
-	tax := subtotal * 0.08 // 8% tax
-	total := subtotal + tax
-
 	// Begin transaction
 	tx, err := h.db.Begin()
 	if err != nil {
@@ -172,7 +177,7 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback()
 
-	// Create order
+	// Create order with placeholder totals (will update later)
 	var orderID int
 	err = tx.QueryRow(`
 		INSERT INTO orders (
@@ -183,7 +188,7 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id`,
 		userID, subscriptionID, req.PickupAddressID, req.DeliveryAddressID,
-		"scheduled", subtotal, tax, total,
+		"scheduled", 0, 0, 0, // Placeholder totals
 		req.SpecialInstructions, req.PickupDate, req.DeliveryDate,
 		req.PickupTimeSlot, req.DeliveryTimeSlot,
 	).Scan(&orderID)
@@ -192,16 +197,88 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Insert order items
+	// Get pickup service ID
+	var pickupServiceID int
+	err = tx.QueryRow("SELECT id FROM services WHERE name = 'pickup_service'").Scan(&pickupServiceID)
+	if err != nil {
+		http.Error(w, "Failed to get pickup service", http.StatusInternalServerError)
+		return
+	}
+	
+	// Add pickup service as a line item (covered if subscription allows)
+	pickupPrice := 10.0 // Default pickup price
+	if subscriptionID != nil && pickupsUsed < pickupsAllowed {
+		// Pickup is covered by subscription
+		pickupPrice = 0.0
+	}
+	
+	_, err = tx.Exec(`
+		INSERT INTO order_items (order_id, service_id, quantity, weight, price, notes)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		orderID, pickupServiceID, 1, nil, pickupPrice, "Pickup Service",
+	)
+	if err != nil {
+		http.Error(w, "Failed to create pickup service item", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert bag items with separate coverage tracking
+	remainingBagCoverage := 0
+	if subscriptionID != nil {
+		// Calculate how many standard bags can be covered (separate from pickup coverage)
+		remainingBagCoverage = bagsAllowed - bagsUsed
+	}
+	
 	for _, item := range req.Items {
-		_, err = tx.Exec(`
-			INSERT INTO order_items (order_id, service_id, quantity, weight, price, notes)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			orderID, item.ServiceID, item.Quantity, item.Weight, item.Price, item.Notes,
-		)
-		if err != nil {
-			http.Error(w, "Failed to create order items", http.StatusInternalServerError)
-			return
+		// Check if this is a standard bag that can be covered
+		var serviceName string
+		tx.QueryRow("SELECT name FROM services WHERE id = $1", item.ServiceID).Scan(&serviceName)
+		
+		if serviceName == "standard_bag" && remainingBagCoverage > 0 {
+			// Calculate how many bags from this item can be covered
+			bagsCovered := item.Quantity
+			if bagsCovered > remainingBagCoverage {
+				bagsCovered = remainingBagCoverage
+			}
+			
+			// Insert covered bags as separate line item with $0 price
+			if bagsCovered > 0 {
+				_, err = tx.Exec(`
+					INSERT INTO order_items (order_id, service_id, quantity, weight, price, notes)
+					VALUES ($1, $2, $3, $4, $5, $6)`,
+					orderID, item.ServiceID, bagsCovered, item.Weight, 0.0, item.Notes,
+				)
+				if err != nil {
+					http.Error(w, "Failed to create covered order items", http.StatusInternalServerError)
+					return
+				}
+				remainingBagCoverage -= bagsCovered
+			}
+			
+			// Insert remaining bags at full price if any
+			remainingBags := item.Quantity - bagsCovered
+			if remainingBags > 0 {
+				_, err = tx.Exec(`
+					INSERT INTO order_items (order_id, service_id, quantity, weight, price, notes)
+					VALUES ($1, $2, $3, $4, $5, $6)`,
+					orderID, item.ServiceID, remainingBags, item.Weight, item.Price, item.Notes,
+				)
+				if err != nil {
+					http.Error(w, "Failed to create charged order items", http.StatusInternalServerError)
+					return
+				}
+			}
+		} else {
+			// Non-standard bags or no coverage available - insert at full price
+			_, err = tx.Exec(`
+				INSERT INTO order_items (order_id, service_id, quantity, weight, price, notes)
+				VALUES ($1, $2, $3, $4, $5, $6)`,
+				orderID, item.ServiceID, item.Quantity, item.Weight, item.Price, item.Notes,
+			)
+			if err != nil {
+				http.Error(w, "Failed to create order items", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -216,20 +293,44 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Update subscription pickup count if using subscription
-	if subscriptionID != nil && standardBagCount > 0 {
-		_, err = tx.Exec(`
-			UPDATE subscriptions 
-			SET pickups_used_this_period = pickups_used_this_period + 1,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = $1`,
-			*subscriptionID,
-		)
-		if err != nil {
-			http.Error(w, "Failed to update subscription usage", http.StatusInternalServerError)
+	// Calculate final totals based on inserted items
+	var subtotal float64
+	rows, err := tx.Query(`
+		SELECT price, quantity FROM order_items WHERE order_id = $1`,
+		orderID,
+	)
+	if err != nil {
+		http.Error(w, "Failed to calculate order totals", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	
+	for rows.Next() {
+		var price float64
+		var quantity int
+		if err := rows.Scan(&price, &quantity); err != nil {
+			http.Error(w, "Failed to calculate order totals", http.StatusInternalServerError)
 			return
 		}
+		subtotal += price * float64(quantity)
 	}
+	
+	tax := subtotal * 0.08 // 8% tax
+	total := subtotal + tax
+
+	// Update the order with correct totals
+	_, err = tx.Exec(`
+		UPDATE orders 
+		SET subtotal = $1, tax = $2, total = $3
+		WHERE id = $4`,
+		subtotal, tax, total, orderID,
+	)
+	if err != nil {
+		http.Error(w, "Failed to update order totals", http.StatusInternalServerError)
+		return
+	}
+
+	// No need to update subscription usage counters - we calculate dynamically from orders
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
@@ -372,13 +473,8 @@ func (h *OrderHandler) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get order ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 4 {
-		http.Error(w, "Invalid order ID", http.StatusBadRequest)
-		return
-	}
-
-	orderID, err := strconv.Atoi(pathParts[3])
+	vars := mux.Vars(r)
+	orderID, err := strconv.Atoi(vars["id"])
 	if err != nil {
 		http.Error(w, "Invalid order ID", http.StatusBadRequest)
 		return
@@ -413,13 +509,8 @@ func (h *OrderHandler) handleUpdateOrderStatus(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get order ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 5 || pathParts[4] != "status" {
-		http.Error(w, "Invalid endpoint", http.StatusBadRequest)
-		return
-	}
-
-	orderID, err := strconv.Atoi(pathParts[3])
+	vars := mux.Vars(r)
+	orderID, err := strconv.Atoi(vars["id"])
 	if err != nil {
 		http.Error(w, "Invalid order ID", http.StatusBadRequest)
 		return
@@ -621,13 +712,8 @@ func (h *OrderHandler) handleGetOrderTracking(w http.ResponseWriter, r *http.Req
 	}
 
 	// Get order ID from URL path
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 5 || pathParts[4] != "tracking" {
-		http.Error(w, "Invalid endpoint", http.StatusBadRequest)
-		return
-	}
-
-	orderID, err := strconv.Atoi(pathParts[3])
+	vars := mux.Vars(r)
+	orderID, err := strconv.Atoi(vars["id"])
 	if err != nil {
 		http.Error(w, "Invalid order ID", http.StatusBadRequest)
 		return

@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { authApi } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 export default function SignIn() {
   const [email, setEmail] = useState('')
@@ -18,35 +19,32 @@ export default function SignIn() {
     setError('')
 
     try {
-      const result = await authApi.login({ email, password })
-      
-      // Store token in localStorage for now (in production, use httpOnly cookies)
-      localStorage.setItem('auth_token', result.token)
-      localStorage.setItem('user', JSON.stringify(result.user))
-      
-      router.push('/dashboard')
+      const result = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        setError('Invalid credentials')
+      } else {
+        router.push('/dashboard')
+      }
     } catch (error: any) {
-      setError(error.message || 'An error occurred. Please try again.')
+      setError('An error occurred. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
   const handleGoogleSignIn = () => {
-    window.location.href = authApi.getGoogleAuthUrl()
+    signIn('google', { callbackUrl: '/dashboard' })
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to Tumble
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Your laundry service awaits
-          </p>
-        </div>
+    <Layout requireAuth={false} title="Sign In" subtitle="Your laundry service awaits">
+      <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
@@ -139,7 +137,8 @@ export default function SignIn() {
             </span>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </Layout>
   )
 }

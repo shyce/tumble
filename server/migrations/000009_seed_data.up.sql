@@ -14,10 +14,15 @@ INSERT INTO services (name, description, base_price, price_per_pound) VALUES
 ('sensitive_skin_detergent', 'Sensitive Skin Detergent add-on', 3.00, 0.00),
 ('scent_booster', 'Scent Booster add-on', 3.00, 0.00);
 
--- Insert sample admin user (password is 'admin123' hashed with bcrypt)
-INSERT INTO users (email, password_hash, first_name, last_name, role, email_verified) VALUES
-('admin@tumble.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Admin', 'User', 'admin', true);
+-- Insert sample users with correct password hashes
+-- Admin user (password: admin123)
+INSERT INTO users (email, password_hash, first_name, last_name, role, email_verified_at) VALUES
+('admin@tumble.com', '$2a$10$jeEIeDbnBKk12n.JfNjSFOXkB9LJwjWwSF9nyHIgU.X.TPqIgloDq', 'Admin', 'User', 'admin', CURRENT_TIMESTAMP);
 
--- Insert sample driver (password is 'driver123' hashed with bcrypt)
-INSERT INTO users (email, password_hash, first_name, last_name, phone, role, email_verified) VALUES
-('driver@tumble.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'John', 'Driver', '555-0123', 'driver', true);
+-- Driver user (password: driver123)
+INSERT INTO users (email, password_hash, first_name, last_name, phone, role, email_verified_at) VALUES
+('driver@tumble.com', '$2a$10$uaPYC1Z6.rZvpDOEGuXDButDMs5FXHNg4FK.Axhtlj06f6xkD2mnm', 'John', 'Driver', '555-0123', 'driver', CURRENT_TIMESTAMP);
+
+-- Customer user (password: customer123)
+INSERT INTO users (email, password_hash, first_name, last_name, phone, role, email_verified_at) VALUES
+('customer@tumble.com', '$2a$10$hWzLSPkHy0aKoGAgltZITu46UJGqSSzAHfHxImwAm3dB567pbzQpO', 'Jane', 'Customer', '555-0456', 'customer', CURRENT_TIMESTAMP);

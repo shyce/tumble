@@ -171,17 +171,11 @@ export interface CostCalculation {
   has_subscription_benefits: boolean
 }
 
-// Helper function to get auth token from localStorage
-function getAuthToken(): string {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('auth_token') || ''
-  }
-  return ''
-}
+import { authFetchWithSession } from './auth-fetch';
 
 export const authApi = {
   async login(credentials: LoginRequest): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -197,7 +191,7 @@ export const authApi = {
   },
 
   async register(userData: RegisterRequest): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -214,13 +208,13 @@ export const authApi = {
   },
 
   getGoogleAuthUrl(): string {
-    return `${API_BASE_URL}/api/auth/google`
+    return `${API_BASE_URL}/api/v1/auth/google`
   }
 }
 
 export const subscriptionApi = {
   async getPlans(): Promise<SubscriptionPlan[]> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/plans`)
+    const response = await fetch(`${API_BASE_URL}/api/v1/subscriptions/plans`)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -230,13 +224,9 @@ export const subscriptionApi = {
     return response.json()
   },
 
-  async createSubscription(request: CreateSubscriptionRequest): Promise<Subscription> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/create`, {
+  async createSubscription(session: any, request: CreateSubscriptionRequest): Promise<Subscription> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/create`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
       body: JSON.stringify(request),
     })
 
@@ -248,12 +238,8 @@ export const subscriptionApi = {
     return response.json()
   },
 
-  async getCurrentSubscription(): Promise<Subscription | null> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/current`, {
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
-    })
+  async getCurrentSubscription(session: any): Promise<Subscription | null> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/current`)
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -266,13 +252,9 @@ export const subscriptionApi = {
     return response.json()
   },
 
-  async updateSubscription(subscriptionId: number, request: UpdateSubscriptionRequest): Promise<Subscription> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/${subscriptionId}`, {
+  async updateSubscription(session: any, subscriptionId: number, request: UpdateSubscriptionRequest): Promise<Subscription> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/${subscriptionId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
       body: JSON.stringify(request),
     })
 
@@ -284,12 +266,9 @@ export const subscriptionApi = {
     return response.json()
   },
 
-  async cancelSubscription(subscriptionId: number): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/${subscriptionId}/cancel`, {
+  async cancelSubscription(session: any, subscriptionId: number): Promise<void> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/${subscriptionId}/cancel`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
     })
 
     if (!response.ok) {
@@ -298,12 +277,8 @@ export const subscriptionApi = {
     }
   },
 
-  async getSubscriptionUsage(): Promise<SubscriptionUsage | null> {
-    const response = await fetch(`${API_BASE_URL}/api/subscriptions/usage`, {
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
-    })
+  async getSubscriptionUsage(session: any): Promise<SubscriptionUsage | null> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/usage`)
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -318,13 +293,9 @@ export const subscriptionApi = {
 }
 
 export const orderApi = {
-  async createOrder(request: CreateOrderRequest): Promise<Order> {
-    const response = await fetch(`${API_BASE_URL}/api/orders/create`, {
+  async createOrder(session: any, request: CreateOrderRequest): Promise<Order> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/orders/create`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
       body: JSON.stringify(request),
     })
 
@@ -336,12 +307,8 @@ export const orderApi = {
     return response.json()
   },
 
-  async getOrders(): Promise<Order[]> {
-    const response = await fetch(`${API_BASE_URL}/api/orders`, {
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
-    })
+  async getOrders(session: any): Promise<Order[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/orders`)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -353,12 +320,8 @@ export const orderApi = {
 }
 
 export const addressApi = {
-  async getAddresses(): Promise<Address[]> {
-    const response = await fetch(`${API_BASE_URL}/api/addresses`, {
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
-    })
+  async getAddresses(session: any): Promise<Address[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/addresses`)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -368,13 +331,9 @@ export const addressApi = {
     return response.json()
   },
 
-  async createAddress(request: CreateAddressRequest): Promise<Address> {
-    const response = await fetch(`${API_BASE_URL}/api/addresses/create`, {
+  async createAddress(session: any, request: CreateAddressRequest): Promise<Address> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/addresses/create`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
       body: JSON.stringify(request),
     })
 
@@ -386,13 +345,9 @@ export const addressApi = {
     return response.json()
   },
 
-  async updateAddress(addressId: number, request: UpdateAddressRequest): Promise<Address> {
-    const response = await fetch(`${API_BASE_URL}/api/addresses/${addressId}`, {
+  async updateAddress(session: any, addressId: number, request: UpdateAddressRequest): Promise<Address> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/addresses/${addressId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
       body: JSON.stringify(request),
     })
 
@@ -404,12 +359,9 @@ export const addressApi = {
     return response.json()
   },
 
-  async deleteAddress(addressId: number): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/addresses/${addressId}`, {
+  async deleteAddress(session: any, addressId: number): Promise<void> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/addresses/${addressId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-      },
     })
 
     if (!response.ok) {
@@ -421,7 +373,7 @@ export const addressApi = {
 
 export const serviceApi = {
   async getServices(): Promise<Service[]> {
-    const response = await fetch(`${API_BASE_URL}/api/services`)
+    const response = await fetch(`${API_BASE_URL}/api/v1/services`)
 
     if (!response.ok) {
       const errorText = await response.text()

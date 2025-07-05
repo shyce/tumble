@@ -1,23 +1,12 @@
 import Link from "next/link";
-import AuthNavigation from "@/components/AuthNavigation";
+import Layout from "@/components/Layout";
 import { Sparkles, Clock, Shield, Smartphone, Truck, Package, Calendar, CreditCard, CheckCircle } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50">
-      {/* Navigation */}
-      <nav className="flex justify-between items-center p-6 bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-emerald-400 rounded-xl flex items-center justify-center shadow-lg">
-            <Sparkles className="text-white w-5 h-5" />
-          </div>
-          <span className="text-slate-800 font-bold text-xl tracking-tight">Tumble</span>
-        </div>
-        <AuthNavigation />
-      </nav>
-
+    <Layout requireAuth={false}>
       {/* Hero Section */}
-      <main className="container mx-auto px-6 py-20">
+      <main className="container mx-auto px-6 py-20 -mt-8">
         <div className="text-center max-w-5xl mx-auto">
           <div className="inline-flex items-center px-4 py-2 rounded-full bg-gradient-to-r from-teal-100 to-emerald-100 text-teal-700 text-sm font-medium mb-6 border border-teal-200">
             <Sparkles className="w-4 h-4 mr-2" />
@@ -50,6 +39,17 @@ export default function Home() {
               className="border-2 border-slate-300 text-slate-700 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-slate-50 hover:border-slate-400 transition-all"
             >
               How It Works
+            </Link>
+          </div>
+
+          {/* Driver CTA */}
+          <div className="mb-12">
+            <Link 
+              href="/apply-driver"
+              className="inline-flex items-center text-teal-600 hover:text-teal-700 font-medium text-lg transition-colors"
+            >
+              Want to drive with us? 
+              <span className="ml-2 hover:translate-x-1 transition-transform inline-block">Apply now →</span>
             </Link>
           </div>
 
@@ -210,6 +210,33 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Driver Section */}
+      <section className="bg-gradient-to-r from-teal-500 to-emerald-500 py-16">
+        <div className="container mx-auto px-6 text-center">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-4xl font-bold text-white mb-4">
+              Drive with Tumble
+            </h2>
+            <p className="text-xl text-white/90 mb-8 leading-relaxed">
+              Join our team of professional drivers and earn competitive pay with flexible schedules. 
+              Be part of a growing business that values quality service and customer satisfaction.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <Link 
+                href="/apply-driver"
+                className="group bg-white text-teal-600 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-gray-50 transition-all transform hover:scale-105 shadow-lg hover:shadow-xl"
+              >
+                Apply to Drive
+                <span className="ml-2 group-hover:translate-x-1 transition-transform inline-block">→</span>
+              </Link>
+              <div className="text-white/80 text-sm">
+                Requirements: Valid driver's license, insurance, reliable vehicle
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="bg-slate-900 text-white py-12">
         <div className="container mx-auto px-6 text-center">
@@ -238,6 +265,6 @@ export default function Home() {
           </div>
         </div>
       </footer>
-    </div>
+    </Layout>
   );
 }

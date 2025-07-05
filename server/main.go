@@ -8,12 +8,18 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/centrifugal/centrifuge"
+	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+)
+
+// Global API configuration
+var (
+	APIVersion = "v1"
+	APIPrefix  = "/api/" + APIVersion
 )
 
 type Server struct {
@@ -26,6 +32,10 @@ type Server struct {
 	subscriptions *SubscriptionHandler
 	addresses *AddressHandler
 	services *ServiceHandler
+	admin    *AdminHandler
+	payments *PaymentHandler
+	driverApps *DriverApplicationHandler
+	driverRoutes *DriverRouteHandler
 }
 
 type HealthResponse struct {
@@ -39,6 +49,9 @@ type HealthResponse struct {
 }
 
 func main() {
+	// Initialize structured logging
+	InitLogger()
+	
 	server := &Server{}
 
 	// Initialize database connection
@@ -70,62 +83,85 @@ func main() {
 	server.subscriptions = NewSubscriptionHandler(server.db)
 	server.addresses = NewAddressHandler(server.db)
 	server.services = NewServiceHandler(server.db)
+	server.admin = NewAdminHandler(server.db, server.realtime)
+	server.payments = NewPaymentHandler(server.db, server.realtime)
+	server.driverApps = NewDriverApplicationHandler(server.db)
+	server.driverRoutes = NewDriverRouteHandler(server.db, server.realtime)
 
-	// Set up HTTP routes
-	http.HandleFunc("/", server.handleHome)
-	http.HandleFunc("/health", server.handleHealth)
-	http.Handle("/connection/websocket", centrifuge.NewWebsocketHandler(server.centNode, centrifuge.WebsocketConfig{}))
+	// Set up HTTP routes with Gorilla Mux
+	r := mux.NewRouter()
+	
+	// Add middleware
+	r.Use(CORSMiddleware)
+	r.Use(LoggingMiddleware)
 
-	// Auth routes
-	http.HandleFunc("/api/auth/register", server.auth.handleRegister)
-	http.HandleFunc("/api/auth/login", server.auth.handleLogin)
-	http.HandleFunc("/api/auth/google", server.auth.handleGoogleLogin)
-	http.HandleFunc("/api/auth/google/callback", server.auth.handleGoogleCallback)
+	// Basic routes
+	r.HandleFunc("/", server.handleHome)
+	r.HandleFunc("/health", server.handleHealth)
+	r.Handle("/connection/websocket", centrifuge.NewWebsocketHandler(server.centNode, centrifuge.WebsocketConfig{}))
+
+	// API subrouter
+	api := r.PathPrefix(APIPrefix).Subrouter()
+
+	// Auth routes (Go backend auth for NextAuth)
+	api.HandleFunc("/auth/register", server.auth.handleRegister)
+	api.HandleFunc("/auth/login", server.auth.handleLogin)
+	api.HandleFunc("/auth/google", server.auth.handleGoogleLogin)
+	api.HandleFunc("/auth/google/callback", server.auth.handleGoogleCallback)
 
 	// Order routes
-	http.HandleFunc("/api/orders", server.orders.handleGetOrders)
-	http.HandleFunc("/api/orders/create", server.orders.handleCreateOrder)
-	http.HandleFunc("/api/orders/", func(w http.ResponseWriter, r *http.Request) {
-		// Route to specific order handlers based on path
-		pathParts := strings.Split(r.URL.Path, "/")
-		if len(pathParts) >= 5 && pathParts[4] == "status" {
-			server.orders.handleUpdateOrderStatus(w, r)
-		} else if len(pathParts) >= 5 && pathParts[4] == "tracking" {
-			server.orders.handleGetOrderTracking(w, r)
-		} else {
-			server.orders.handleGetOrder(w, r)
-		}
-	})
+	api.HandleFunc("/orders", server.orders.handleGetOrders)
+	api.HandleFunc("/orders/create", server.orders.handleCreateOrder)
+	api.HandleFunc("/orders/{id}", server.orders.handleGetOrder)
+	api.HandleFunc("/orders/{id}/status", server.orders.handleUpdateOrderStatus)
+	api.HandleFunc("/orders/{id}/tracking", server.orders.handleGetOrderTracking)
 
 	// Subscription routes
-	http.HandleFunc("/api/subscriptions/plans", server.subscriptions.handleGetPlans)
-	http.HandleFunc("/api/subscriptions/current", server.subscriptions.handleGetSubscription)
-	http.HandleFunc("/api/subscriptions/create", server.subscriptions.handleCreateSubscription)
-	http.HandleFunc("/api/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage)
-	http.HandleFunc("/api/subscriptions/", func(w http.ResponseWriter, r *http.Request) {
-		// Route to specific subscription handlers based on path
-		pathParts := strings.Split(r.URL.Path, "/")
-		if len(pathParts) >= 5 && pathParts[4] == "cancel" {
-			server.subscriptions.handleCancelSubscription(w, r)
-		} else {
-			server.subscriptions.handleUpdateSubscription(w, r)
-		}
-	})
+	api.HandleFunc("/subscriptions/plans", server.subscriptions.handleGetPlans)
+	api.HandleFunc("/subscriptions/current", server.subscriptions.handleGetSubscription)
+	api.HandleFunc("/subscriptions/create", server.subscriptions.handleCreateSubscription)
+	api.HandleFunc("/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage)
+	api.HandleFunc("/subscriptions/{id}", server.subscriptions.handleUpdateSubscription)
+	api.HandleFunc("/subscriptions/{id}/cancel", server.subscriptions.handleCancelSubscription)
 
 	// Address routes
-	http.HandleFunc("/api/addresses", server.addresses.handleGetAddresses)
-	http.HandleFunc("/api/addresses/create", server.addresses.handleCreateAddress)
-	http.HandleFunc("/api/addresses/", func(w http.ResponseWriter, r *http.Request) {
-		// Route to specific address handlers based on method
-		if r.Method == http.MethodDelete {
-			server.addresses.handleDeleteAddress(w, r)
-		} else {
-			server.addresses.handleUpdateAddress(w, r)
-		}
-	})
+	api.HandleFunc("/addresses", server.addresses.handleGetAddresses)
+	api.HandleFunc("/addresses/create", server.addresses.handleCreateAddress)
+	api.HandleFunc("/addresses/{id}", server.addresses.handleUpdateAddress).Methods("PUT", "PATCH")
+	api.HandleFunc("/addresses/{id}", server.addresses.handleDeleteAddress).Methods("DELETE")
 
 	// Service routes
-	http.HandleFunc("/api/services", server.services.handleGetServices)
+	api.HandleFunc("/services", server.services.handleGetServices)
+
+	// Admin routes (all require admin role)
+	api.HandleFunc("/admin/users", server.admin.requireAdmin(server.admin.handleGetUsers))
+	api.HandleFunc("/admin/users/role", server.admin.requireAdmin(server.admin.handleUpdateUserRole))
+	api.HandleFunc("/admin/orders/summary", server.admin.requireAdmin(server.admin.handleGetOrdersSummary))
+	api.HandleFunc("/admin/orders", server.admin.requireAdmin(server.admin.handleGetAllOrders))
+	api.HandleFunc("/admin/analytics/revenue", server.admin.requireAdmin(server.admin.handleGetRevenueAnalytics))
+	api.HandleFunc("/admin/drivers/stats", server.admin.requireAdmin(server.admin.handleGetDriverStats))
+	api.HandleFunc("/admin/drivers/assign", server.admin.requireAdmin(server.admin.handleAssignDriverToRoute))
+
+	// Payment routes
+	api.HandleFunc("/payments/setup-intent", server.payments.handleCreateSetupIntent)
+	api.HandleFunc("/payments/methods", server.payments.handleGetPaymentMethods)
+	api.HandleFunc("/payments/methods/default", server.payments.handleSetDefaultPaymentMethod)
+	api.HandleFunc("/payments/methods/{id}", server.payments.handleDeletePaymentMethod)
+	api.HandleFunc("/payments/subscription", server.payments.handleCreateSubscriptionPayment)
+	api.HandleFunc("/payments/order", server.payments.handleCreateOrderPayment)
+	api.HandleFunc("/payments/history", server.payments.handleGetPaymentHistory)
+	api.HandleFunc("/payments/webhook", server.payments.handleStripeWebhook)
+
+	// Driver application routes
+	api.HandleFunc("/driver-applications/submit", server.driverApps.handleSubmitDriverApplication)
+	api.HandleFunc("/driver-applications/mine", server.driverApps.handleGetUserApplication)
+	api.HandleFunc("/admin/driver-applications", server.driverApps.requireAdmin(server.driverApps.handleGetAllApplications))
+	api.HandleFunc("/admin/driver-applications/review", server.driverApps.requireAdmin(server.driverApps.handleReviewApplication))
+
+	// Driver route management routes
+	api.HandleFunc("/driver/routes", server.driverRoutes.requireDriver(server.driverRoutes.handleGetDriverRoutes))
+	api.HandleFunc("/driver/routes/start", server.driverRoutes.requireDriver(server.driverRoutes.handleStartRoute))
+	api.HandleFunc("/driver/route-orders/status", server.driverRoutes.requireDriver(server.driverRoutes.handleUpdateRouteOrderStatus))
 
 	// Start Centrifuge node
 	if err := server.centNode.Run(); err != nil {
@@ -138,7 +174,7 @@ func main() {
 	}
 
 	log.Printf("Server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

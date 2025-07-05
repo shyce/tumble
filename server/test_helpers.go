@@ -206,6 +206,7 @@ func (db *TestDB) GetPlanID(t *testing.T, planName string) int {
 	return planID
 }
 
+
 // CreateTestJWTToken creates a test JWT token for authentication
 func CreateTestJWTToken(userID int) string {
 	// This would normally use the same JWT creation logic as the auth handler
@@ -291,6 +292,8 @@ var _ RealtimeInterface = (*MockRealtimeHandler)(nil)
 func (m *MockRealtimeHandler) ClearUpdates() {
 	m.PublishedUpdates = make([]MockOrderUpdate, 0)
 }
+
+// ResetSubscriptionUsage is no longer needed since we calculate usage dynamically from orders
 
 // isDBConnectionError checks if the error is related to database already existing
 func isDBConnectionError(err error) bool {

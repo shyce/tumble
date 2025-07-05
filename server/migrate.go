@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -28,10 +29,17 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("could not run migrations: %v", err)
 	}
 
+	// Only log migration messages if not in test mode
+	isTest := os.Getenv("GO_ENV") == "test" || os.Getenv("TEST_DB_NAME") != ""
+	
 	if err == migrate.ErrNoChange {
-		log.Println("No new migrations to run")
+		if !isTest {
+			log.Println("No new migrations to run")
+		}
 	} else {
-		log.Println("Migrations completed successfully")
+		if !isTest {
+			log.Println("Migrations completed successfully")
+		}
 	}
 
 	return nil

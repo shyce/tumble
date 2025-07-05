@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Sparkles, ArrowLeft, Package, Calendar, Clock, CheckCircle, Truck, AlertCircle, Plus } from 'lucide-react'
+import { Package, Calendar, Clock, CheckCircle, Truck, AlertCircle, Plus } from 'lucide-react'
 import { orderApi, Order } from '@/lib/api'
+import Layout from '@/components/Layout'
 
 interface OrderStatus {
   color: string
@@ -22,6 +24,7 @@ const statusConfig: Record<string, OrderStatus> = {
 }
 
 export default function OrdersPage() {
+  const { data: session, status } = useSession()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -30,15 +33,26 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const loadOrders = async () => {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
+      if (status === 'loading') return
+      
+      if (!session) {
         router.push('/auth/signin')
         return
       }
 
       try {
-        const ordersData = await orderApi.getOrders()
-        setOrders(ordersData)
+        const response = await fetch('/api/v1/orders', {
+          headers: {
+            'Authorization': `Bearer ${(session as any)?.accessToken}`,
+          },
+        })
+        
+        if (response.ok) {
+          const ordersData = await response.json()
+          setOrders(ordersData)
+        } else {
+          setError('Failed to load orders')
+        }
       } catch (err) {
         setError('Failed to load orders')
         console.error('Error loading orders:', err)
@@ -48,7 +62,7 @@ export default function OrdersPage() {
     }
 
     loadOrders()
-  }, [router])
+  }, [session, status, router])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -96,32 +110,7 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-emerald-50">
-      {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <Link href="/dashboard" className="flex items-center space-x-3">
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-emerald-400 rounded-xl flex items-center justify-center shadow-lg">
-                    <Sparkles className="text-white w-5 h-5" />
-                  </div>
-                  <span className="text-slate-800 font-bold text-xl tracking-tight">Tumble</span>
-                </div>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-slate-900 mb-2">Order History</h1>
-          <p className="text-lg text-slate-600">Track your current and past laundry orders</p>
-        </div>
+    <Layout requireAuth={true} title="Order History" subtitle="Track your current and past laundry orders">
 
         {/* Error Message */}
         {error && (
@@ -223,16 +212,51 @@ export default function OrdersPage() {
                                 ?.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
                                 ?.join(' ') || 'Service'
                               
-                              const lineTotal = item.price * item.quantity
+                              // Check if this item was actually covered by subscription
+                              const isStandardBag = item.service_name === 'standard_bag'
+                              const isPickupService = item.service_name === 'pickup_service'
+                              // If it's in a subscription order and the price is $0, it was covered
+                              const hasSubscriptionBenefits = order.subscription_id && item.price === 0
+                              
+                              // For subscription-covered items, show original price
+                              let originalPrice = item.price
+                              if (hasSubscriptionBenefits) {
+                                if (isStandardBag) originalPrice = 45
+                                if (isPickupService) originalPrice = 10
+                              }
+                              
+                              const actualPrice = item.price
+                              const lineTotal = actualPrice * item.quantity
+                              const originalLineTotal = originalPrice * item.quantity
                               
                               return (
                                 <div key={index} className={`px-4 py-3 ${index > 0 ? 'border-t border-slate-100' : ''}`}>
                                   <div className="flex justify-between items-start">
                                     <div className="flex-1">
-                                      <div className="font-medium text-slate-900">{serviceName}</div>
-                                      <div className="text-sm text-slate-600 mt-1">
-                                        Quantity: {item.quantity} @ ${item.price.toFixed(2)} each
+                                      <div className="flex items-center space-x-2">
+                                        <span className="font-medium text-slate-900">{serviceName}</span>
+                                        {hasSubscriptionBenefits && (
+                                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full font-medium">
+                                            Covered
+                                          </span>
+                                        )}
                                       </div>
+                                      
+                                      {hasSubscriptionBenefits ? (
+                                        <div className="text-sm mt-1">
+                                          <div className="text-slate-500 line-through">
+                                            Quantity: {item.quantity} @ ${originalPrice.toFixed(2)} each
+                                          </div>
+                                          <div className="text-emerald-600 font-medium">
+                                            Covered by subscription - $0.00 each
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-slate-600 mt-1">
+                                          Quantity: {item.quantity} @ ${item.price.toFixed(2)} each
+                                        </div>
+                                      )}
+                                      
                                       {item.notes && (
                                         <div className="text-xs text-slate-500 mt-1 italic">
                                           Note: {item.notes}
@@ -240,9 +264,20 @@ export default function OrdersPage() {
                                       )}
                                     </div>
                                     <div className="text-right ml-4">
-                                      <div className="font-semibold text-slate-900">
-                                        ${lineTotal.toFixed(2)}
-                                      </div>
+                                      {hasSubscriptionBenefits ? (
+                                        <div>
+                                          <div className="text-sm text-slate-400 line-through">
+                                            ${originalLineTotal.toFixed(2)}
+                                          </div>
+                                          <div className="font-semibold text-emerald-600">
+                                            $0.00
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="font-semibold text-slate-900">
+                                          ${lineTotal.toFixed(2)}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -306,7 +341,6 @@ export default function OrdersPage() {
             })}
           </div>
         )}
-      </div>
-    </div>
+    </Layout>
   )
 }

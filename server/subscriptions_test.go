@@ -26,7 +26,7 @@ func TestSubscriptionHandler_GetPlans(t *testing.T) {
 		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var plans []map[string]interface{}
+	var plans []SubscriptionPlan
 	if err := json.Unmarshal(w.Body.Bytes(), &plans); err != nil {
 		t.Errorf("Failed to unmarshal response: %v", err)
 	}
@@ -39,21 +39,27 @@ func TestSubscriptionHandler_GetPlans(t *testing.T) {
 	// Check for expected plan structure
 	if len(plans) > 0 {
 		plan := plans[0]
-		requiredFields := []string{"id", "name", "price", "frequency", "bags", "features"}
-		for _, field := range requiredFields {
-			if _, exists := plan[field]; !exists {
-				t.Errorf("Expected plan to have field '%s'", field)
-			}
+		
+		// Verify required fields exist
+		if plan.ID == 0 {
+			t.Error("Expected plan to have ID")
+		}
+		if plan.Name == "" {
+			t.Error("Expected plan to have name")
+		}
+		if plan.PricePerMonth == 0 {
+			t.Error("Expected plan to have price_per_month")
+		}
+		if plan.PickupsPerMonth == 0 {
+			t.Error("Expected plan to have pickups_per_month")
 		}
 
 		// Verify pricing matches README specs
 		foundCorrectPricing := false
 		for _, p := range plans {
-			if name, ok := p["name"].(string); ok && name == "Weekly Standard" {
-				if price, ok := p["price"].(float64); ok && price == 170.0 {
-					foundCorrectPricing = true
-					break
-				}
+			if p.Name == "Weekly Standard" && p.PricePerMonth == 170.0 {
+				foundCorrectPricing = true
+				break
 			}
 		}
 		if !foundCorrectPricing {
@@ -389,20 +395,30 @@ func TestSubscriptionHandler_GetUsage(t *testing.T) {
 	// Create an order to test usage calculation
 	orderID := db.CreateTestOrder(t, userID, addressID)
 	
-	// Link order to subscription
-	_, err := db.Exec("UPDATE orders SET subscription_id = $1 WHERE id = $2", subscriptionID, orderID)
+	// Link order to subscription and set pickup date within subscription period
+	_, err := db.Exec("UPDATE orders SET subscription_id = $1, pickup_date = CURRENT_DATE WHERE id = $2", subscriptionID, orderID)
 	if err != nil {
 		t.Fatalf("Failed to link order to subscription: %v", err)
 	}
 
-	// Add order items
+	// Add order items - use price = 0 to indicate covered bags
 	serviceID := db.GetServiceID(t, "standard_bag")
 	_, err = db.Exec(`
 		INSERT INTO order_items (order_id, service_id, quantity, price)
-		VALUES ($1, $2, 2, 45.00)`,
+		VALUES ($1, $2, 2, 0.00)`,
 		orderID, serviceID)
 	if err != nil {
 		t.Fatalf("Failed to add order items: %v", err)
+	}
+	
+	// Also add pickup service as covered
+	pickupServiceID := db.GetServiceID(t, "pickup_service")
+	_, err = db.Exec(`
+		INSERT INTO order_items (order_id, service_id, quantity, price)
+		VALUES ($1, $2, 1, 0.00)`,
+		orderID, pickupServiceID)
+	if err != nil {
+		t.Fatalf("Failed to add pickup service: %v", err)
 	}
 
 	// Handler will be created per test with mocked getUserID

@@ -57,11 +57,55 @@
 - [x] Add real-time order tracking with Centrifuge
 - [x] Create comprehensive test suite with 55%+ coverage  
 - [x] Create pickup scheduling system (frontend page + API integration)
-- [ ] Create admin panel API endpoints
-- [ ] Add payment integration (Stripe)
+- [x] Create admin panel API endpoints
+- [x] Add payment integration (Stripe)
+
+## Consolidated Role-Based Dashboard
+- [x] **Unified dashboard with role-specific UI** (/dashboard)
+- [x] **Customer view**: Schedule pickup, subscription management, order history, driver application (2x2 grid + banner)
+- [x] **Driver view**: Routes, earnings, schedule, assigned orders, driver settings
+- [x] **Admin view**: Driver applications, user management, order oversight, analytics, admin settings  
+- [x] **Role-based action cards** with appropriate icons and navigation
+- [x] **FULLY removed separate /driver and /admin routes** - everything under /dashboard
+- [x] **Fixed all API routes to use /api/v1/ consistently**
+- [x] **Subscription plans API working** (192.168.0.201:3005/api/v1/subscriptions/plans)
+- [x] **Driver application form functional** (/apply-driver)
+- [x] **Moved admin pages to /dashboard structure** (driver-applications, users, analytics, etc)
+- [x] **Removed AdminNavigation component** - no special admin navigation needed
+
+### Dashboard Sub-Pages to Implement
+#### Customer Features
+- [x] Order scheduling (/dashboard/schedule)  
+- [x] Subscription management (/dashboard/subscription)
+- [x] Order history (/dashboard/orders)
+- [x] Account settings (/dashboard/settings)
+- [x] Driver application form (/apply-driver)
+
+#### Driver Features  
+- [ ] **Driver routes page (/dashboard/routes)** - Route management interface
+- [ ] **Driver earnings page (/dashboard/earnings)** - Earnings tracking and history
+- [x] Driver schedule (/dashboard/schedule) - shared with customer view
+- [x] Driver orders (/dashboard/orders) - show assigned orders
+- [x] Driver settings (/dashboard/settings) - driver-specific settings
+
+#### Admin Features
+- [x] Driver application review (/admin/driver-applications) - existing page
+- [ ] **Users management page (/dashboard/users)** - View, edit, manage all users  
+- [ ] **Admin order management (/dashboard/orders)** - System-wide order oversight
+- [ ] **Analytics dashboard (/dashboard/analytics)** - System metrics and reporting
+- [ ] **Admin settings page (/dashboard/settings)** - System configuration
+
+## Authentication & Authorization
+- [x] NextAuth.js v5 configuration with credential provider
+- [x] Role-based access control (customer/driver/admin)
+- [x] JWT token management with user role persistence
+- [x] Session management and automatic redirects
+- [x] API route protection with role verification
+- [x] Frontend role-based UI rendering
 
 ## Advanced Features
 - [ ] Add notification system (email/SMS)
 - [ ] Implement route optimization for pickups/deliveries
-- [ ] Create admin operations dashboard
-- [ ] Add driver mobile interface
+- [ ] Driver earnings and payment system
+- [ ] Advanced analytics dashboard for admins
+- [ ] Mobile-responsive driver interface improvements

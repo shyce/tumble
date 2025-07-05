@@ -54,16 +54,33 @@ export default function AuthNavigation() {
   }
 
   if (user) {
+    const getDashboardLink = () => {
+      switch (user.role) {
+        case 'admin':
+          return '/dashboard/driver-applications'
+        default:
+          return '/dashboard'
+      }
+    }
+
     return (
       <div className="flex items-center space-x-4">
         <span className="text-white/90 hidden sm:inline">
           Hi, {user.first_name}!
         </span>
+        {user.role !== 'driver' && user.role !== 'admin' && (
+          <Link 
+            href="/apply-driver" 
+            className="text-white hover:text-white/80 transition-colors hidden sm:inline"
+          >
+            Drive with Us
+          </Link>
+        )}
         <Link 
-          href="/dashboard" 
+          href={getDashboardLink()} 
           className="bg-white text-teal-600 px-4 py-2 rounded-full font-medium hover:bg-white/90 transition-colors"
         >
-          Dashboard
+          {user.role === 'admin' ? 'Admin' : user.role === 'driver' ? 'Driver' : 'Dashboard'}
         </Link>
         <button
           onClick={handleSignOut}
@@ -77,6 +94,12 @@ export default function AuthNavigation() {
 
   return (
     <div className="space-x-4">
+      <Link 
+        href="/apply-driver" 
+        className="text-white hover:text-white/80 transition-colors"
+      >
+        Drive with Us
+      </Link>
       <Link 
         href="/auth/signin" 
         className="text-white hover:text-white/80 transition-colors"

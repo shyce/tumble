@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestOrderHandler_CreateOrder(t *testing.T) {
@@ -251,17 +253,22 @@ func TestOrderHandler_GetOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", fmt.Sprintf("/api/orders/%d", tt.orderID), nil)
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Mock auth for test
 			handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
 				return tt.userID, nil
 			}
+			
+			// Register the route
+			router.HandleFunc("/orders/{id}", handler.handleGetOrder).Methods("GET")
 
-			handler.handleGetOrder(w, req)
+			req := httptest.NewRequest("GET", fmt.Sprintf("/orders/%d", tt.orderID), nil)
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
@@ -331,18 +338,23 @@ func TestOrderHandler_UpdateOrderStatus(t *testing.T) {
 			}
 			body, _ := json.Marshal(reqBody)
 
-			req := httptest.NewRequest("PUT", fmt.Sprintf("/api/orders/%d/status", tt.orderID), bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Mock auth for test
 			handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
 				return tt.userID, nil
 			}
+			
+			// Register the route
+			router.HandleFunc("/orders/{id}/status", handler.handleUpdateOrderStatus).Methods("PUT")
 
-			handler.handleUpdateOrderStatus(w, req)
+			req := httptest.NewRequest("PUT", fmt.Sprintf("/orders/%d/status", tt.orderID), bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
@@ -418,17 +430,22 @@ func TestOrderHandler_GetOrderTracking(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", fmt.Sprintf("/api/orders/%d/tracking", tt.orderID), nil)
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Mock auth for test
 			handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
 				return tt.userID, nil
 			}
+			
+			// Register the route
+			router.HandleFunc("/orders/{id}/tracking", handler.handleGetOrderTracking).Methods("GET")
 
-			handler.handleGetOrderTracking(w, req)
+			req := httptest.NewRequest("GET", fmt.Sprintf("/orders/%d/tracking", tt.orderID), nil)
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)

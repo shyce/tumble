@@ -11,6 +11,7 @@ INSERT INTO services (name, description, base_price, price_per_pound) VALUES
 ('rush_bag', 'Rush Tumble Bag (faster turnaround)', 55.00, 0.00),
 ('additional_bag', 'Additional bags beyond subscription', 40.00, 0.00),
 ('comforter', 'Comforter cleaning', 25.00, 0.00),
+('pickup_service', 'Pickup and delivery service', 10.00, 0.00),
 ('sensitive_skin_detergent', 'Sensitive Skin Detergent add-on', 3.00, 0.00),
 ('scent_booster', 'Scent Booster add-on', 3.00, 0.00);
 

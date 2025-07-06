@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestOrderHandler_SubscriptionPricingCalculations(t *testing.T) {
@@ -268,11 +270,15 @@ func TestOrderHandler_OrderViewingAccuracy(t *testing.T) {
 	}
 
 	// Now retrieve the order and verify it shows the same pricing
-	req = httptest.NewRequest("GET", fmt.Sprintf("/api/orders/%d", createdOrder.ID), nil)
+	// Set up router for get order
+	router := mux.NewRouter()
+	router.HandleFunc("/orders/{id}", handler.handleGetOrder).Methods("GET")
+	
+	req = httptest.NewRequest("GET", fmt.Sprintf("/orders/%d", createdOrder.ID), nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(userID)))
 
 	w = httptest.NewRecorder()
-	handler.handleGetOrder(w, req)
+	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("Failed to retrieve order: %d - %s", w.Code, w.Body.String())

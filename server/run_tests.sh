@@ -1,7 +1,13 @@
 #!/bin/bash
 
 # Tumble API Test Runner
-# This script sets up the test environment and runs all tests
+# This script sets up the test environment and runs tests
+# Usage: ./run_tests.sh [test_pattern] [additional_go_test_args...]
+# Examples:
+#   ./run_tests.sh                              # Run all tests
+#   ./run_tests.sh TestOrderHandler_CreateOrder # Run specific test
+#   ./run_tests.sh TestOrder                    # Run all order tests
+#   ./run_tests.sh -v -race                     # Run with verbose and race detection
 
 set -e
 
@@ -81,61 +87,50 @@ echo "📦 Installing Go dependencies..."
 go mod tidy
 go mod download
 
-# Run tests with coverage
+# Parse arguments
+TEST_PATTERN=""
+ADDITIONAL_ARGS=""
+
+# Check if first argument looks like a test pattern (starts with uppercase or is a flag)
+if [ $# -gt 0 ] && [[ "$1" =~ ^[A-Z] || "$1" =~ ^- ]]; then
+    if [[ "$1" =~ ^[A-Z] ]]; then
+        TEST_PATTERN="$1"
+        shift
+    fi
+fi
+
+# Collect remaining arguments
+ADDITIONAL_ARGS="$@"
+
+# Build test command
+TEST_CMD="go test"
+
+# Add verbose flag if not already present
+if [[ ! "$ADDITIONAL_ARGS" =~ -v ]]; then
+    TEST_CMD="$TEST_CMD -v"
+fi
+
+# Add test pattern if specified
+if [ ! -z "$TEST_PATTERN" ]; then
+    TEST_CMD="$TEST_CMD -run $TEST_PATTERN"
+fi
+
+# Add additional arguments
+if [ ! -z "$ADDITIONAL_ARGS" ]; then
+    TEST_CMD="$TEST_CMD $ADDITIONAL_ARGS"
+fi
+
+# Add current directory
+TEST_CMD="$TEST_CMD ."
+
+# Run tests
 echo ""
 echo "🧪 Running tests..."
 echo "=================="
+if [ ! -z "$TEST_PATTERN" ]; then
+    echo "🎯 Test pattern: $TEST_PATTERN"
+fi
+echo "🚀 Command: $TEST_CMD"
+echo ""
 
-# Test individual packages
-echo ""
-echo "📝 Testing Authentication..."
-go test -v -run "TestAuth" . -coverprofile=coverage_auth.out
-
-echo ""
-echo "📬 Testing Address Management..."
-go test -v -run "TestAddress" . -coverprofile=coverage_addresses.out
-
-echo ""
-echo "📦 Testing Order Management..."
-go test -v -run "TestOrder" . -coverprofile=coverage_orders.out
-
-echo ""
-echo "💳 Testing Subscription Management..."
-go test -v -run "TestSubscription" . -coverprofile=coverage_subscriptions.out
-
-# Run all tests together
-echo ""
-echo "🚀 Running full test suite..."
-go test -v . -coverprofile=coverage_all.out
-
-# Generate coverage report
-echo ""
-echo "📊 Test Coverage Report:"
-go tool cover -func=coverage_all.out | tail -1
-
-# Run benchmarks
-echo ""
-echo "⚡ Running benchmarks..."
-go test -bench=. -benchmem . > benchmark_results.txt
-echo "Benchmark results saved to benchmark_results.txt"
-
-# Check for race conditions
-echo ""
-echo "🏁 Checking for race conditions..."
-go test -race . > /dev/null 2>&1 && echo "✅ No race conditions detected" || echo "⚠️  Race conditions detected"
-
-echo ""
-echo "🎉 Test suite completed!"
-echo ""
-echo "📋 Summary:"
-echo "   - All unit tests: ✅"
-echo "   - Coverage report: Generated"
-echo "   - Benchmarks: Completed"
-echo "   - Race detection: Completed"
-echo ""
-echo "📁 Generated files:"
-echo "   - coverage_*.out (coverage data)"
-echo "   - benchmark_results.txt (benchmark results)"
-echo ""
-echo "🔍 To view detailed coverage:"
-echo "   go tool cover -html=coverage_all.out"
+eval $TEST_CMD

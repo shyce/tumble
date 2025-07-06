@@ -73,6 +73,7 @@ func (db *TestDB) CleanupTestDB() {
 }
 
 // TruncateTables clears all data from tables while preserving structure
+// Note: services and subscription_plans are NOT truncated to preserve seed data
 func (db *TestDB) TruncateTables(t *testing.T) {
 	tables := []string{
 		"order_status_history",

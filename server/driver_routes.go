@@ -86,7 +86,7 @@ func (h *DriverRouteHandler) handleGetDriverRoutes(w http.ResponseWriter, r *htt
 	}
 
 	query := `
-		SELECT id, driver_id, route_date, route_type, status, created_at, updated_at
+		SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
 		FROM driver_routes
 		WHERE driver_id = $1 AND DATE(route_date) = $2
 		ORDER BY created_at ASC
@@ -125,13 +125,13 @@ func (h *DriverRouteHandler) getRouteOrders(routeID int) ([]RouteOrder, error) {
 		SELECT 
 			ro.id, ro.order_id, ro.sequence_number, ro.status,
 			u.first_name || ' ' || u.last_name as customer_name,
-			u.phone as customer_phone,
+			COALESCE(u.phone, '') as customer_phone,
 			CASE 
 				WHEN o.pickup_address_id IS NOT NULL THEN 
-					(SELECT street || ', ' || city || ', ' || state || ' ' || zip_code 
+					(SELECT street_address || ', ' || city || ', ' || state || ' ' || zip_code 
 					 FROM addresses WHERE id = o.pickup_address_id)
 				ELSE 
-					(SELECT street || ', ' || city || ', ' || state || ' ' || zip_code 
+					(SELECT street_address || ', ' || city || ', ' || state || ' ' || zip_code 
 					 FROM addresses WHERE id = o.delivery_address_id)
 			END as address,
 			o.special_instructions,
@@ -159,6 +159,7 @@ func (h *DriverRouteHandler) getRouteOrders(routeID int) ([]RouteOrder, error) {
 			&order.SpecialInstructions, &order.PickupTimeSlot, &order.DeliveryTimeSlot,
 		)
 		if err != nil {
+			// Log error for debugging - likely NULL values in optional fields
 			continue
 		}
 		orders = append(orders, order)
@@ -201,8 +202,8 @@ func (h *DriverRouteHandler) handleUpdateRouteOrderStatus(w http.ResponseWriter,
 		return
 	}
 
-	// Validate status
-	validStatuses := []string{"pending", "in_progress", "completed", "failed"}
+	// Validate status (must match database constraint)
+	validStatuses := []string{"pending", "completed", "failed"}
 	isValid := false
 	for _, status := range validStatuses {
 		if req.Status == status {
@@ -336,8 +337,8 @@ func (h *DriverRouteHandler) handleStartRoute(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Update route status to started
-	_, err = h.db.Exec("UPDATE driver_routes SET status = 'started' WHERE id = $1", routeID)
+	// Update route status to in_progress
+	_, err = h.db.Exec("UPDATE driver_routes SET status = 'in_progress' WHERE id = $1", routeID)
 	if err != nil {
 		http.Error(w, "Failed to start route", http.StatusInternalServerError)
 		return

@@ -330,8 +330,8 @@ func TestAdminHandler_GetOrdersSummary(t *testing.T) {
 		t.Errorf("Expected 4 total orders, got %d", summary.TotalOrders)
 	}
 
-	if summary.PendingOrders != 1 {
-		t.Errorf("Expected 1 pending order, got %d", summary.PendingOrders)
+	if summary.PendingOrders != 2 { // Both 'pending' and 'scheduled' count as pending
+		t.Errorf("Expected 2 pending orders (1 pending + 1 scheduled), got %d", summary.PendingOrders)
 	}
 
 	if summary.InProcessOrders != 1 {

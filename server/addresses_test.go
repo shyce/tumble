@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestAddressHandler_CreateAddress(t *testing.T) {
+	InitLogger()
 	db := SetupTestDB(t)
 	defer db.CleanupTestDB()
 
@@ -250,6 +253,9 @@ func TestAddressHandler_GetAddresses(t *testing.T) {
 }
 
 func TestAddressHandler_UpdateAddress(t *testing.T) {
+	// Initialize logger to avoid nil pointer
+	InitLogger()
+	
 	db := SetupTestDB(t)
 	defer db.CleanupTestDB()
 
@@ -308,19 +314,24 @@ func TestAddressHandler_UpdateAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("PUT", fmt.Sprintf("/api/addresses/%d", tt.addressID), bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Mock auth for test
 			handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
 				return tt.userID, nil
 			}
+			
+			// Register the route
+			router.HandleFunc("/addresses/{id}", handler.handleUpdateAddress).Methods("PUT")
 
-			handler.handleUpdateAddress(w, req)
+			body, _ := json.Marshal(tt.requestBody)
+			req := httptest.NewRequest("PUT", fmt.Sprintf("/addresses/%d", tt.addressID), bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d. Response: %s", tt.expectedStatus, w.Code, w.Body.String())
@@ -350,6 +361,7 @@ func TestAddressHandler_UpdateAddress(t *testing.T) {
 }
 
 func TestAddressHandler_DeleteAddress(t *testing.T) {
+	InitLogger()
 	db := SetupTestDB(t)
 	defer db.CleanupTestDB()
 
@@ -381,17 +393,22 @@ func TestAddressHandler_DeleteAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("DELETE", fmt.Sprintf("/api/addresses/%d", tt.addressID), nil)
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Mock auth for test
 			handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
 				return tt.userID, nil
 			}
+			
+			// Register the route
+			router.HandleFunc("/addresses/{id}", handler.handleDeleteAddress).Methods("DELETE")
 
-			handler.handleDeleteAddress(w, req)
+			req := httptest.NewRequest("DELETE", fmt.Sprintf("/addresses/%d", tt.addressID), nil)
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d. Response: %s", tt.expectedStatus, w.Code, w.Body.String())

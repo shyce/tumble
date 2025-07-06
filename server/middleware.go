@@ -63,12 +63,16 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 // responseWriter wraps http.ResponseWriter to capture status code
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode    int
+	headerWritten bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
+	if !rw.headerWritten {
+		rw.statusCode = code
+		rw.headerWritten = true
+		rw.ResponseWriter.WriteHeader(code)
+	}
 }
 
 // CORSMiddleware handles CORS with logging

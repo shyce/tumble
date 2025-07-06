@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestSubscriptionHandler_GetPlans(t *testing.T) {
@@ -270,14 +272,9 @@ func TestSubscriptionHandler_UpdateSubscription(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("PUT", fmt.Sprintf("/api/subscriptions/%d", tt.subscriptionID), bytes.NewBuffer(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
-			// Mock getUserIDFromRequest
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Create handler with mocked getUserID for this specific test
 			handler := &SubscriptionHandler{
 				db: db.DB,
@@ -285,8 +282,17 @@ func TestSubscriptionHandler_UpdateSubscription(t *testing.T) {
 					return tt.userID, nil
 				},
 			}
+			
+			// Register the route
+			router.HandleFunc("/subscriptions/{id}", handler.handleUpdateSubscription).Methods("PUT")
 
-			handler.handleUpdateSubscription(w, req)
+			body, _ := json.Marshal(tt.requestBody)
+			req := httptest.NewRequest("PUT", fmt.Sprintf("/subscriptions/%d", tt.subscriptionID), bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
@@ -339,12 +345,9 @@ func TestSubscriptionHandler_CancelSubscription(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", fmt.Sprintf("/api/subscriptions/%d/cancel", tt.subscriptionID), nil)
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
-
-			w := httptest.NewRecorder()
-
-			// Mock getUserIDFromRequest
+			// Set up router
+			router := mux.NewRouter()
+			
 			// Create handler with mocked getUserID for this specific test
 			handler := &SubscriptionHandler{
 				db: db.DB,
@@ -352,8 +355,15 @@ func TestSubscriptionHandler_CancelSubscription(t *testing.T) {
 					return tt.userID, nil
 				},
 			}
+			
+			// Register the route
+			router.HandleFunc("/subscriptions/{id}/cancel", handler.handleCancelSubscription).Methods("POST")
 
-			handler.handleCancelSubscription(w, req)
+			req := httptest.NewRequest("POST", fmt.Sprintf("/subscriptions/%d/cancel", tt.subscriptionID), nil)
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", CreateTestJWTToken(tt.userID)))
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)

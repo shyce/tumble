@@ -18,4 +18,4 @@ COPY . .
 EXPOSE 3000
 
 # Run with Turbopack in development
-CMD ["pnpm", "dev"]
+CMD ["./node_modules/.bin/next", "dev", "--turbopack", "--hostname", "0.0.0.0"]

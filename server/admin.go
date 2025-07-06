@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type AdminHandler struct {
@@ -148,7 +150,9 @@ func (h *AdminHandler) handleUpdateUserRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("id")
+	// Extract user ID from URL path
+	vars := mux.Vars(r)
+	userIDStr := vars["id"]
 	if userIDStr == "" {
 		http.Error(w, "User ID required", http.StatusBadRequest)
 		return
@@ -274,9 +278,16 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 			o.status, o.total_weight, o.subtotal, o.tax, o.total, o.special_instructions,
 			o.pickup_date, o.delivery_date, o.pickup_time_slot, o.delivery_time_slot,
 			o.created_at, o.updated_at,
-			u.email, u.first_name, u.last_name
+			u.email, u.first_name, u.last_name,
+			dr.id as route_id, dr.route_type, 
+			CASE WHEN du.first_name IS NOT NULL THEN du.first_name || ' ' || du.last_name ELSE NULL END as driver_name,
+			du.id as driver_id,
+			CASE WHEN ro.id IS NOT NULL THEN true ELSE false END as is_assigned
 		FROM orders o
 		JOIN users u ON o.user_id = u.id
+		LEFT JOIN route_orders ro ON o.id = ro.order_id
+		LEFT JOIN driver_routes dr ON ro.route_id = dr.id
+		LEFT JOIN users du ON dr.driver_id = du.id
 		WHERE 1=1`
 
 	args := []interface{}{}
@@ -319,8 +330,13 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 
 	type AdminOrder struct {
 		Order
-		UserEmail string `json:"user_email"`
-		UserName  string `json:"user_name"`
+		UserEmail   string  `json:"user_email"`
+		UserName    string  `json:"user_name"`
+		RouteID     *int    `json:"route_id,omitempty"`
+		RouteType   *string `json:"route_type,omitempty"`
+		DriverName  *string `json:"driver_name,omitempty"`
+		DriverID    *int    `json:"driver_id,omitempty"`
+		IsAssigned  bool    `json:"is_assigned"`
 	}
 
 	orders := []AdminOrder{}
@@ -333,6 +349,7 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 			&o.PickupDate, &o.DeliveryDate, &o.PickupTimeSlot, &o.DeliveryTimeSlot,
 			&o.CreatedAt, &o.UpdatedAt,
 			&o.UserEmail, &firstName, &lastName,
+			&o.RouteID, &o.RouteType, &o.DriverName, &o.DriverID, &o.IsAssigned,
 		)
 		if err != nil {
 			continue

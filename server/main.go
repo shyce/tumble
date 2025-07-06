@@ -136,12 +136,12 @@ func main() {
 
 	// Admin routes (all require admin role)
 	api.HandleFunc("/admin/users", server.admin.requireAdmin(server.admin.handleGetUsers))
-	api.HandleFunc("/admin/users/role", server.admin.requireAdmin(server.admin.handleUpdateUserRole))
+	api.HandleFunc("/admin/users/{id}/role", server.admin.requireAdmin(server.admin.handleUpdateUserRole))
 	api.HandleFunc("/admin/orders/summary", server.admin.requireAdmin(server.admin.handleGetOrdersSummary))
 	api.HandleFunc("/admin/orders", server.admin.requireAdmin(server.admin.handleGetAllOrders))
 	api.HandleFunc("/admin/analytics/revenue", server.admin.requireAdmin(server.admin.handleGetRevenueAnalytics))
 	api.HandleFunc("/admin/drivers/stats", server.admin.requireAdmin(server.admin.handleGetDriverStats))
-	api.HandleFunc("/admin/drivers/assign", server.admin.requireAdmin(server.admin.handleAssignDriverToRoute))
+	api.HandleFunc("/admin/routes/assign", server.admin.requireAdmin(server.admin.handleAssignDriverToRoute))
 
 	// Payment routes
 	api.HandleFunc("/payments/setup-intent", server.payments.handleCreateSetupIntent)

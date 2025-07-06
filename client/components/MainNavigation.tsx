@@ -51,7 +51,7 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
       return [
         ...baseLinks,
         { href: '/dashboard/users', icon: Users, label: 'Users' },
-        { href: '/dashboard/orders', icon: Package, label: 'Orders' },
+        { href: '/dashboard/admin/orders', icon: Package, label: 'Orders' },
         { href: '/dashboard/earnings/company', icon: TrendingUp, label: 'Revenue' },
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
       ]
@@ -91,7 +91,9 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
                   ? pathname === '/dashboard'
                   : link.href.includes('/earnings') 
                     ? pathname.startsWith('/dashboard/earnings')
-                    : pathname === link.href
+                    : link.href.includes('/admin/orders')
+                      ? pathname.startsWith('/dashboard/admin/orders')
+                      : pathname === link.href
                 
                 return (
                   <Link
@@ -193,7 +195,9 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
                   ? pathname === '/dashboard'
                   : link.href.includes('/earnings') 
                     ? pathname.startsWith('/dashboard/earnings')
-                    : pathname === link.href
+                    : link.href.includes('/admin/orders')
+                      ? pathname.startsWith('/dashboard/admin/orders')
+                      : pathname === link.href
                 
                 return (
                   <Link

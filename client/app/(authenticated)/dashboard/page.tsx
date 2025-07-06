@@ -307,17 +307,17 @@ export default function Dashboard() {
           </Link>
 
           <Link
-            href="/dashboard/orders"
+            href="/dashboard/admin/orders"
             className="relative group bg-white border-2 border-slate-200 p-6 rounded-xl hover:border-purple-200 hover:shadow-lg transition-all"
           >
             <div className="flex items-center justify-between">
               <div>
                 <Package className="text-purple-600 w-8 h-8 mb-3" />
                 <h3 className="text-lg font-semibold text-slate-800">
-                  All Orders
+                  Order Management
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  View system orders
+                  Manage all orders & routes
                 </p>
               </div>
               <span className="text-slate-400 group-hover:text-purple-600 transition-colors">→</span>

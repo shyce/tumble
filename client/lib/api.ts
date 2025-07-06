@@ -412,6 +412,32 @@ export const driverApi = {
   }
 }
 
+export interface AdminOrder extends Order {
+  user_email: string
+  user_name: string
+  route_id?: number
+  route_type?: string
+  driver_name?: string
+  driver_id?: number
+  is_assigned: boolean
+}
+
+export interface RouteAssignmentRequest {
+  driver_id: number
+  order_ids: number[]
+  route_date: string
+  route_type: 'pickup' | 'delivery'
+}
+
+export interface DriverStats {
+  driver_id: number
+  driver_name: string
+  total_deliveries: number
+  today_deliveries: number
+  avg_delivery_time_minutes: number
+  rating: number
+}
+
 export const adminApi = {
   async getOrdersSummary(session: any): Promise<any> {
     const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/summary`)
@@ -424,8 +450,73 @@ export const adminApi = {
     return response.json()
   },
 
-  async getUsers(session: any): Promise<User[]> {
-    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users`)
+  async getAllOrders(session: any, params?: { status?: string, date?: string, user_id?: string, limit?: number, offset?: number }): Promise<AdminOrder[]> {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.append('status', params.status)
+    if (params?.date) searchParams.append('date', params.date)
+    if (params?.user_id) searchParams.append('user_id', params.user_id)
+    if (params?.limit) searchParams.append('limit', params.limit.toString())
+    if (params?.offset) searchParams.append('offset', params.offset.toString())
+
+    const url = `${API_BASE_URL}/api/v1/admin/orders${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    const response = await authFetchWithSession(session, url)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getUsers(session: any, params?: { role?: string, search?: string, limit?: number, offset?: number }): Promise<User[]> {
+    const searchParams = new URLSearchParams()
+    if (params?.role) searchParams.append('role', params.role)
+    if (params?.search) searchParams.append('search', params.search)
+    if (params?.limit) searchParams.append('limit', params.limit.toString())
+    if (params?.offset) searchParams.append('offset', params.offset.toString())
+
+    const url = `${API_BASE_URL}/api/v1/admin/users${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    const response = await authFetchWithSession(session, url)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getDriverStats(session: any): Promise<DriverStats[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/drivers/stats`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async assignDriverToRoute(session: any, request: RouteAssignmentRequest): Promise<{ message: string, route_id: number }> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/routes/assign`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async updateUserRole(session: any, userId: number, role: string): Promise<{ message: string }> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users/${userId}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    })
 
     if (!response.ok) {
       const errorText = await response.text()

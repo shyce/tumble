@@ -23,7 +23,7 @@ const statusConfig: Record<string, OrderStatus> = {
   cancelled: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Cancelled' }
 }
 
-export default function OrdersPage() {
+export default function CustomerOrdersPage() {
   const { data: session, status } = useSession()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,19 +40,16 @@ export default function OrdersPage() {
         return
       }
 
+      // Redirect admins to admin orders page
+      const user = session.user as any
+      if (user.role === 'admin') {
+        router.push('/dashboard/admin/orders')
+        return
+      }
+
       try {
-        const response = await fetch('/api/v1/orders', {
-          headers: {
-            'Authorization': `Bearer ${(session as any)?.accessToken}`,
-          },
-        })
-        
-        if (response.ok) {
-          const ordersData = await response.json()
-          setOrders(ordersData)
-        } else {
-          setError('Failed to load orders')
-        }
+        const ordersData = await orderApi.getOrders(session)
+        setOrders(ordersData)
       } catch (err) {
         setError('Failed to load orders')
         console.error('Error loading orders:', err)

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -80,19 +81,30 @@ func (h *DriverRouteHandler) handleGetDriverRoutes(w http.ResponseWriter, r *htt
 		return
 	}
 
+
 	date := r.URL.Query().Get("date")
+	var query string
+	var rows *sql.Rows
+	
 	if date == "" {
-		date = time.Now().Format("2006-01-02")
+		// If no date specified, show all upcoming routes (today and future)
+		query = `
+			SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
+			FROM driver_routes
+			WHERE driver_id = $1 AND DATE(route_date) >= CURRENT_DATE
+			ORDER BY route_date ASC, created_at ASC
+		`
+		rows, err = h.db.Query(query, driverID)
+	} else {
+		// If date specified, show routes for that specific date
+		query = `
+			SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
+			FROM driver_routes
+			WHERE driver_id = $1 AND DATE(route_date) = $2
+			ORDER BY created_at ASC
+		`
+		rows, err = h.db.Query(query, driverID, date)
 	}
-
-	query := `
-		SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
-		FROM driver_routes
-		WHERE driver_id = $1 AND DATE(route_date) = $2
-		ORDER BY created_at ASC
-	`
-
-	rows, err := h.db.Query(query, driverID, date)
 	if err != nil {
 		http.Error(w, "Failed to fetch routes", http.StatusInternalServerError)
 		return

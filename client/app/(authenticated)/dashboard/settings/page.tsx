@@ -9,6 +9,13 @@ import {
 } from 'lucide-react'
 import { addressApi, Address, CreateAddressRequest, UpdateAddressRequest } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
+import { TumbleInput } from '@/components/ui/tumble-input'
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { TumbleSelect } from '@/components/ui/tumble-select'
+import { TumbleTextarea } from '@/components/ui/tumble-textarea'
+import { TumbleCheckbox } from '@/components/ui/tumble-checkbox'
+import { TumbleIconButton } from '@/components/ui/tumble-icon-button'
+import { ChangePasswordModal } from '@/components/ui/change-password-modal'
 
 interface UserProfile {
   id: number
@@ -217,76 +224,61 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label htmlFor="firstName" className="block text-sm font-semibold text-slate-800 mb-2">
-                    First Name
-                  </label>
-                  <input
-                    type="text"
-                    id="firstName"
-                    value={profile.firstName}
-                    onChange={(e) => setProfile(prev => ({ ...prev, firstName: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                    required
-                  />
-                </div>
+                <TumbleInput
+                  type="text"
+                  id="firstName"
+                  label="First Name"
+                  value={profile.firstName}
+                  onChange={(e) => setProfile(prev => ({ ...prev, firstName: e.target.value }))}
+                  required
+                />
 
-                <div>
-                  <label htmlFor="lastName" className="block text-sm font-semibold text-slate-800 mb-2">
-                    Last Name
-                  </label>
-                  <input
-                    type="text"
-                    id="lastName"
-                    value={profile.lastName}
-                    onChange={(e) => setProfile(prev => ({ ...prev, lastName: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                    required
-                  />
-                </div>
+                <TumbleInput
+                  type="text"
+                  id="lastName"
+                  label="Last Name"
+                  value={profile.lastName}
+                  onChange={(e) => setProfile(prev => ({ ...prev, lastName: e.target.value }))}
+                  required
+                />
 
-                <div>
-                  <label htmlFor="email" className="block text-sm font-semibold text-slate-800 mb-2">
-                    <Mail className="inline w-4 h-4 mr-1" />
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    id="email"
-                    value={profile.email}
-                    onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                    required
-                  />
-                </div>
+                <TumbleInput
+                  type="email"
+                  id="email"
+                  label={
+                    <span className="flex items-center">
+                      <Mail className="w-4 h-4 mr-1" />
+                      Email
+                    </span>
+                  }
+                  value={profile.email}
+                  onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
+                  required
+                />
 
-                <div>
-                  <label htmlFor="phone" className="block text-sm font-semibold text-slate-800 mb-2">
-                    <Phone className="inline w-4 h-4 mr-1" />
-                    Phone
-                  </label>
-                  <input
-                    type="tel"
-                    id="phone"
-                    value={profile.phone}
-                    onChange={(e) => setProfile(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="(555) 123-4567"
-                    className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                  />
-                </div>
+                <TumbleInput
+                  type="tel"
+                  id="phone"
+                  label={
+                    <span className="flex items-center">
+                      <Phone className="w-4 h-4 mr-1" />
+                      Phone
+                    </span>
+                  }
+                  value={profile.phone}
+                  onChange={(e) => setProfile(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="(555) 123-4567"
+                />
               </div>
 
               <div className="mt-6">
-                <button
+                <TumbleButton
                   type="submit"
                   disabled={loading}
-                  className={`px-6 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 text-white rounded-lg font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all flex items-center ${
-                    loading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
                 >
                   <Save className="w-4 h-4 mr-2" />
                   {loading ? 'Saving...' : 'Save Profile'}
-                </button>
+                </TumbleButton>
               </div>
             </div>
           </form>
@@ -298,13 +290,12 @@ export default function SettingsPage() {
                 <MapPin className="w-6 h-6 text-emerald-500 mr-3" />
                 <h2 className="text-xl font-bold text-slate-800">Delivery Addresses</h2>
               </div>
-              <button
+              <TumbleButton
                 onClick={() => setShowAddressForm(true)}
-                className="px-4 py-2 bg-teal-500 text-white rounded-lg font-medium hover:bg-teal-600 transition-colors flex items-center"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Address
-              </button>
+              </TumbleButton>
             </div>
 
             {/* Address List */}
@@ -341,26 +332,29 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         {!address.is_default && (
-                          <button
+                          <TumbleButton
                             onClick={() => handleSetDefault(address.id)}
-                            className="px-3 py-1 text-teal-600 hover:text-teal-700 text-sm font-medium"
+                            variant="ghost"
+                            size="sm"
                           >
                             Set as Default
-                          </button>
+                          </TumbleButton>
                         )}
-                        <button
+                        <TumbleIconButton
                           onClick={() => handleEditAddress(address)}
-                          className="p-2 text-slate-500 hover:text-slate-700"
+                          variant="ghost"
+                          size="sm"
                         >
                           <Edit className="w-4 h-4" />
-                        </button>
+                        </TumbleIconButton>
                         {!address.is_default && (
-                          <button
+                          <TumbleIconButton
                             onClick={() => handleDeleteAddress(address.id)}
-                            className="p-2 text-red-500 hover:text-red-700"
+                            variant="destructive"
+                            size="sm"
                           >
                             <Trash2 className="w-4 h-4" />
-                          </button>
+                          </TumbleIconButton>
                         )}
                       </div>
                     </div>
@@ -384,125 +378,90 @@ export default function SettingsPage() {
                 
                 <form onSubmit={handleAddressSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        Address Type
-                      </label>
-                      <select
-                        value={addressForm.type}
-                        onChange={(e) => setAddressForm(prev => ({ ...prev, type: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                        required
-                      >
-                        <option value="home">Home</option>
-                        <option value="work">Work</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </div>
+                    <TumbleSelect
+                      label="Address Type"
+                      value={addressForm.type}
+                      onChange={(e) => setAddressForm(prev => ({ ...prev, type: e.target.value }))}
+                      required
+                    >
+                      <option value="home">Home</option>
+                      <option value="work">Work</option>
+                      <option value="other">Other</option>
+                    </TumbleSelect>
 
                     <div className="flex items-center">
-                      <label className="flex items-center space-x-2 mt-6">
-                        <input
-                          type="checkbox"
-                          checked={addressForm.is_default}
-                          onChange={(e) => setAddressForm(prev => ({ ...prev, is_default: e.target.checked }))}
-                          className="w-4 h-4 text-teal-600 rounded focus:ring-teal-500"
-                        />
-                        <span className="text-sm font-medium text-slate-800">Set as default</span>
-                      </label>
+                      <TumbleCheckbox
+                        checked={addressForm.is_default}
+                        onChange={(e) => setAddressForm(prev => ({ ...prev, is_default: e.target.checked }))}
+                        label="Set as default"
+                      />
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Street Address
-                    </label>
-                    <input
+                  <TumbleInput
+                    type="text"
+                    label="Street Address"
+                    value={addressForm.street_address}
+                    onChange={(e) => setAddressForm(prev => ({ ...prev, street_address: e.target.value }))}
+                    placeholder="123 Main Street"
+                    required
+                  />
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="col-span-2 md:col-span-1">
+                      <TumbleInput
+                        type="text"
+                        label="City"
+                        value={addressForm.city}
+                        onChange={(e) => setAddressForm(prev => ({ ...prev, city: e.target.value }))}
+                        required
+                      />
+                    </div>
+
+                    <TumbleInput
                       type="text"
-                      value={addressForm.street_address}
-                      onChange={(e) => setAddressForm(prev => ({ ...prev, street_address: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                      placeholder="123 Main Street"
+                      label="State"
+                      value={addressForm.state}
+                      onChange={(e) => setAddressForm(prev => ({ ...prev, state: e.target.value }))}
+                      maxLength={2}
+                      placeholder="CA"
+                      required
+                    />
+
+                    <TumbleInput
+                      type="text"
+                      label="ZIP Code"
+                      value={addressForm.zip_code}
+                      onChange={(e) => setAddressForm(prev => ({ ...prev, zip_code: e.target.value }))}
+                      maxLength={10}
+                      placeholder="12345"
                       required
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div className="col-span-2 md:col-span-1">
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        City
-                      </label>
-                      <input
-                        type="text"
-                        value={addressForm.city}
-                        onChange={(e) => setAddressForm(prev => ({ ...prev, city: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        State
-                      </label>
-                      <input
-                        type="text"
-                        value={addressForm.state}
-                        onChange={(e) => setAddressForm(prev => ({ ...prev, state: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                        maxLength={2}
-                        placeholder="CA"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        ZIP Code
-                      </label>
-                      <input
-                        type="text"
-                        value={addressForm.zip_code}
-                        onChange={(e) => setAddressForm(prev => ({ ...prev, zip_code: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white"
-                        maxLength={10}
-                        placeholder="12345"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-800 mb-2">
-                      Delivery Instructions (Optional)
-                    </label>
-                    <textarea
-                      value={addressForm.delivery_instructions}
-                      onChange={(e) => setAddressForm(prev => ({ ...prev, delivery_instructions: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-colors text-slate-900 bg-white placeholder-slate-500"
-                      placeholder="Leave at front door, ring doorbell, etc."
-                      rows={3}
-                    />
-                  </div>
+                  <TumbleTextarea
+                    label="Delivery Instructions (Optional)"
+                    value={addressForm.delivery_instructions}
+                    onChange={(e) => setAddressForm(prev => ({ ...prev, delivery_instructions: e.target.value }))}
+                    placeholder="Leave at front door, ring doorbell, etc."
+                    rows={3}
+                  />
 
                   <div className="flex space-x-4">
-                    <button
+                    <TumbleButton
                       type="submit"
                       disabled={loading}
-                      className={`px-6 py-3 bg-gradient-to-r from-teal-500 to-emerald-500 text-white rounded-lg font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all flex items-center ${
-                        loading ? 'opacity-50 cursor-not-allowed' : ''
-                      }`}
                     >
                       <Save className="w-4 h-4 mr-2" />
                       {loading ? 'Saving...' : editingAddress ? 'Update Address' : 'Save Address'}
-                    </button>
-                    <button
+                    </TumbleButton>
+                    <TumbleButton
                       type="button"
                       onClick={cancelAddressForm}
-                      className="px-6 py-3 bg-slate-500 text-white rounded-lg font-semibold hover:bg-slate-600 transition-colors"
+                      variant="secondary"
                     >
                       Cancel
-                    </button>
+                    </TumbleButton>
                   </div>
                 </form>
               </div>
@@ -516,12 +475,12 @@ export default function SettingsPage() {
               <h2 className="text-xl font-bold text-slate-800">Security</h2>
             </div>
 
-            <button
-              type="button"
-              className="px-6 py-3 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors"
-            >
-              Change Password
-            </button>
+            <ChangePasswordModal>
+              <TumbleButton variant="outline">
+                <Shield className="w-4 h-4 mr-2" />
+                Change Password
+              </TumbleButton>
+            </ChangePasswordModal>
           </div>
         </div>
       </div>

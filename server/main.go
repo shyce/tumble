@@ -106,6 +106,7 @@ func main() {
 	// Auth routes (Go backend auth for NextAuth)
 	api.HandleFunc("/auth/register", server.auth.handleRegister)
 	api.HandleFunc("/auth/login", server.auth.handleLogin)
+	api.HandleFunc("/auth/change-password", server.auth.handleChangePassword)
 	api.HandleFunc("/auth/google", server.auth.handleGoogleLogin)
 	api.HandleFunc("/auth/google/callback", server.auth.handleGoogleCallback)
 

@@ -106,6 +106,11 @@ type AuthResponse struct {
 	User  User   `json:"user"`
 }
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 type GoogleUserInfo struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
@@ -456,6 +461,79 @@ func (h *AuthHandler) verifyToken(tokenString string) (*jwt.Token, error) {
 		}
 		return h.jwtSecret, nil
 	})
+}
+
+func (h *AuthHandler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get user ID from JWT token
+	userID, err := getUserIDFromRequest(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		http.Error(w, "Current password and new password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate new password length (minimum 8 characters)
+	if len(req.NewPassword) < 8 {
+		http.Error(w, "New password must be at least 8 characters long", http.StatusBadRequest)
+		return
+	}
+
+	// Get current password hash from database
+	var currentPasswordHash string
+	query := `SELECT password_hash FROM users WHERE id = $1`
+	err = h.db.QueryRow(query, userID).Scan(&currentPasswordHash)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify current password
+	if !h.checkPassword(req.CurrentPassword, currentPasswordHash) {
+		http.Error(w, "Current password is incorrect", http.StatusBadRequest)
+		return
+	}
+
+	// Check if new password is different from current password
+	if h.checkPassword(req.NewPassword, currentPasswordHash) {
+		http.Error(w, "New password must be different from current password", http.StatusBadRequest)
+		return
+	}
+
+	// Hash new password
+	newPasswordHash, err := h.hashPassword(req.NewPassword)
+	if err != nil {
+		http.Error(w, "Error processing new password", http.StatusInternalServerError)
+		return
+	}
+
+	// Update password in database
+	updateQuery := `UPDATE users SET password_hash = $1 WHERE id = $2`
+	_, err = h.db.Exec(updateQuery, newPasswordHash, userID)
+	if err != nil {
+		http.Error(w, "Error updating password", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Password changed successfully"})
 }
 
 func (h *AuthHandler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {

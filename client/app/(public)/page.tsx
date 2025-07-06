@@ -44,7 +44,7 @@ export default function Home() {
           {/* Driver CTA */}
           <div className="mb-12">
             <Link 
-              href="/apply-driver"
+              href="/dashboard/apply-driver"
               className="inline-flex items-center text-teal-600 hover:text-teal-700 font-medium text-lg transition-colors"
             >
               Want to drive with us? 
@@ -222,7 +222,7 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <Link 
-                href="/apply-driver"
+                href="/dashboard/apply-driver"
                 className="group bg-white text-teal-600 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-gray-50 transition-all transform hover:scale-105 shadow-lg hover:shadow-xl"
               >
                 Apply to Drive

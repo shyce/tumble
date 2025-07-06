@@ -5,6 +5,8 @@ import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
+import { TumbleInput } from '@/components/ui/tumble-input'
+import { TumbleButton } from '@/components/ui/tumble-button'
 
 export default function SignIn() {
   const [email, setEmail] = useState('')
@@ -46,48 +48,43 @@ export default function SignIn() {
       <div className="max-w-md w-full space-y-8">
         <PageHeader title="Sign In" subtitle="Your laundry service awaits" compact={true} />
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] focus:z-10 sm:text-sm"
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+          <div className="space-y-4">
+            <TumbleInput
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              label="Email address"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <TumbleInput
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              label="Password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </div>
 
           {error && (
             <div className="text-red-500 text-sm text-center">{error}</div>
           )}
 
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-[#A7E7E1] hover:bg-[#8BE2B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#A7E7E1] disabled:opacity-50"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </div>
+          <TumbleButton
+            type="submit"
+            disabled={loading}
+            className="w-full"
+            size="lg"
+          >
+            {loading ? 'Signing in...' : 'Sign in'}
+          </TumbleButton>
 
           <div className="mt-6">
             <div className="relative">
@@ -100,10 +97,11 @@ export default function SignIn() {
             </div>
 
             <div className="mt-6">
-              <button
+              <TumbleButton
                 type="button"
                 onClick={handleGoogleSignIn}
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                variant="outline"
+                className="w-full"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path
@@ -124,7 +122,7 @@ export default function SignIn() {
                   />
                 </svg>
                 <span className="ml-2">Sign in with Google</span>
-              </button>
+              </TumbleButton>
             </div>
           </div>
 

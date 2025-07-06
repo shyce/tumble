@@ -207,6 +207,21 @@ export const authApi = {
     return response.json()
   },
 
+  async changePassword(session: any, currentPassword: string, newPassword: string): Promise<void> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/auth/change-password`, {
+      method: 'POST',
+      body: JSON.stringify({
+        currentPassword,
+        newPassword
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(errorText || 'Failed to change password')
+    }
+  },
+
   getGoogleAuthUrl(): string {
     return `${API_BASE_URL}/api/v1/auth/google`
   }
@@ -374,6 +389,43 @@ export const addressApi = {
 export const serviceApi = {
   async getServices(): Promise<Service[]> {
     const response = await fetch(`${API_BASE_URL}/api/v1/services`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  }
+}
+
+export const driverApi = {
+  async getRoutes(session: any): Promise<any[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/driver/routes`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  }
+}
+
+export const adminApi = {
+  async getOrdersSummary(session: any): Promise<any> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/summary`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getUsers(session: any): Promise<User[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users`)
 
     if (!response.ok) {
       const errorText = await response.text()

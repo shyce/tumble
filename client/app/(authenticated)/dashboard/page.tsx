@@ -2,9 +2,10 @@
 
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
+import { subscriptionApi, driverApi, adminApi, orderApi } from '@/lib/api'
 import { 
   Sparkles, 
   Calendar, 
@@ -22,9 +23,31 @@ import {
   TrendingUp
 } from 'lucide-react'
 
+interface CustomerData {
+  subscription: {
+    plan: string | null
+    status: string
+  }
+  nextPickup: string | null
+}
+
+interface DriverData {
+  todayRoutes: number
+  weeklyEarnings: number
+}
+
+interface AdminData {
+  totalUsers: number
+  activeOrders: number
+}
+
 export default function Dashboard() {
   const { data: session, status } = useSession()
   const router = useRouter()
+  const [customerData, setCustomerData] = useState<CustomerData | null>(null)
+  const [driverData, setDriverData] = useState<DriverData | null>(null)
+  const [adminData, setAdminData] = useState<AdminData | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (status === 'loading') return
@@ -33,6 +56,94 @@ export default function Dashboard() {
       router.push('/auth/signin')
     }
   }, [session, status, router])
+
+  useEffect(() => {
+    if (!session?.user) return
+    
+    const loadDashboardData = async () => {
+      try {
+        setLoading(true)
+        const user = session.user as any
+        
+        if (user.role === 'customer' || !user.role) {
+          // Fetch customer subscription and derive next pickup from orders
+          const [subscription, orders] = await Promise.all([
+            subscriptionApi.getCurrentSubscription(session),
+            orderApi.getOrders(session)
+          ])
+
+          // Find next scheduled pickup from orders
+          const upcomingOrders = orders.filter(order => {
+            const isValidStatus = order.status === 'scheduled' || order.status === 'pending'
+            const pickupDate = new Date(order.pickup_date)
+            const today = new Date()
+            today.setHours(0, 0, 0, 0) // Start of today
+            
+            // Include orders from today onwards
+            return isValidStatus && pickupDate >= today
+          })
+          
+          const nextPickupOrder = upcomingOrders.sort((a, b) => 
+            new Date(a.pickup_date).getTime() - new Date(b.pickup_date).getTime()
+          )[0]
+
+          setCustomerData({
+            subscription: {
+              plan: subscription?.plan?.name || null,
+              status: subscription?.status || 'inactive'
+            },
+            nextPickup: nextPickupOrder?.pickup_date || null
+          })
+        } else if (user.role === 'driver') {
+          // Fetch driver routes and calculate stats
+          const routes = await driverApi.getRoutes(session)
+          
+          // Calculate today's routes
+          const today = new Date().toISOString().split('T')[0]
+          const todayRoutes = routes.filter(route => 
+            route.scheduled_date?.startsWith(today)
+          ).length
+
+          // Calculate weekly earnings (mock for now since earnings aren't in routes)
+          const weeklyEarnings = 0 // TODO: Implement earnings calculation
+
+          setDriverData({
+            todayRoutes,
+            weeklyEarnings
+          })
+        } else if (user.role === 'admin') {
+          // Fetch admin data using existing endpoints
+          const [users, ordersSummary] = await Promise.all([
+            adminApi.getUsers(session),
+            adminApi.getOrdersSummary(session)
+          ])
+
+          setAdminData({
+            totalUsers: users.length,
+            activeOrders: ordersSummary.active_orders || 0
+          })
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error)
+        // Set default/empty state on error
+        const user = session.user as any
+        if (user.role === 'customer' || !user.role) {
+          setCustomerData({
+            subscription: { plan: null, status: 'inactive' },
+            nextPickup: null
+          })
+        } else if (user.role === 'driver') {
+          setDriverData({ todayRoutes: 0, weeklyEarnings: 0 })
+        } else if (user.role === 'admin') {
+          setAdminData({ totalUsers: 0, activeOrders: 0 })
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadDashboardData()
+  }, [session?.user?.id])
 
 
   if (status === 'loading') {
@@ -310,7 +421,7 @@ export default function Dashboard() {
         </Link>
 
         <Link
-          href="/apply-driver"
+          href="/dashboard/apply-driver"
           className="relative group bg-gradient-to-br from-blue-500 to-indigo-500 p-6 rounded-xl hover:shadow-xl transition-all transform hover:scale-105 sm:col-span-2"
         >
           <div className="flex items-center justify-between">
@@ -389,36 +500,76 @@ export default function Dashboard() {
                       <>
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">Current Plan</dt>
-                          <dd className="text-sm font-semibold text-slate-900">No active subscription</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-16 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : customerData?.subscription.plan ? (
+                              customerData.subscription.plan
+                            ) : (
+                              'No active subscription'
+                            )}
+                          </dd>
                         </div>
                         
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">Next Pickup</dt>
-                          <dd className="text-sm font-semibold text-slate-900">Not scheduled</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-20 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : customerData?.nextPickup ? (
+                              new Date(customerData.nextPickup).toLocaleDateString()
+                            ) : (
+                              'Not scheduled'
+                            )}
+                          </dd>
                         </div>
                       </>
                     ) : user.role === 'driver' ? (
                       <>
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">Today's Routes</dt>
-                          <dd className="text-sm font-semibold text-slate-900">0 assigned</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-12 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : (
+                              `${driverData?.todayRoutes || 0} assigned`
+                            )}
+                          </dd>
                         </div>
                         
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">This Week</dt>
-                          <dd className="text-sm font-semibold text-slate-900">$0.00 earned</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-16 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : (
+                              `$${driverData?.weeklyEarnings?.toFixed(2) || '0.00'} earned`
+                            )}
+                          </dd>
                         </div>
                       </>
                     ) : (
                       <>
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">Total Users</dt>
-                          <dd className="text-sm font-semibold text-slate-900">0</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-8 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : (
+                              adminData?.totalUsers || 0
+                            )}
+                          </dd>
                         </div>
                         
                         <div className="flex items-center justify-between py-3 border-b border-slate-100">
                           <dt className="text-sm font-medium text-slate-500">Active Orders</dt>
-                          <dd className="text-sm font-semibold text-slate-900">0</dd>
+                          <dd className="text-sm font-semibold text-slate-900">
+                            {loading ? (
+                              <div className="w-8 h-4 bg-slate-200 animate-pulse rounded"></div>
+                            ) : (
+                              adminData?.activeOrders || 0
+                            )}
+                          </dd>
                         </div>
                       </>
                     )}
@@ -432,13 +583,13 @@ export default function Dashboard() {
                     </div>
                   </dl>
                   
-                  {(user.role === 'customer' || !user.role) && (
+                  {(user.role === 'customer' || !user.role) && !loading && (
                     <div className="mt-6">
                       <Link
                         href="/dashboard/subscription"
                         className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white text-center py-3 px-4 rounded-xl font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg inline-block"
                       >
-                        Choose a Plan
+                        {customerData?.subscription.plan ? 'Manage Plan' : 'Choose a Plan'}
                       </Link>
                     </div>
                   )}

@@ -5,6 +5,9 @@ import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
+import { TumbleInput } from '@/components/ui/tumble-input'
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { authApi } from '@/lib/api'
 
 export default function SignUp() {
   const [formData, setFormData] = useState({
@@ -81,50 +84,50 @@ export default function SignUp() {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <input
+              <TumbleInput
                 name="firstName"
                 type="text"
                 required
-                className="px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] sm:text-sm"
-                placeholder="First name"
+                label="First name"
+                placeholder="Enter first name"
                 value={formData.firstName}
                 onChange={handleChange}
               />
-              <input
+              <TumbleInput
                 name="lastName"
                 type="text"
                 required
-                className="px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] sm:text-sm"
-                placeholder="Last name"
+                label="Last name"
+                placeholder="Enter last name"
                 value={formData.lastName}
                 onChange={handleChange}
               />
             </div>
-            <input
+            <TumbleInput
               name="email"
               type="email"
               autoComplete="email"
               required
-              className="w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] sm:text-sm"
-              placeholder="Email address"
+              label="Email address"
+              placeholder="Enter your email"
               value={formData.email}
               onChange={handleChange}
             />
-            <input
+            <TumbleInput
               name="phone"
               type="tel"
-              className="w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] sm:text-sm"
-              placeholder="Phone number (optional)"
+              label="Phone number (optional)"
+              placeholder="Enter phone number"
               value={formData.phone}
               onChange={handleChange}
             />
-            <input
+            <TumbleInput
               name="password"
               type="password"
               autoComplete="new-password"
               required
-              className="w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-[#A7E7E1] focus:border-[#A7E7E1] sm:text-sm"
-              placeholder="Password"
+              label="Password"
+              placeholder="Create a password"
               value={formData.password}
               onChange={handleChange}
             />
@@ -134,15 +137,14 @@ export default function SignUp() {
             <div className="text-red-500 text-sm text-center">{error}</div>
           )}
 
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-[#A7E7E1] hover:bg-[#8BE2B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#A7E7E1] disabled:opacity-50"
-            >
-              {loading ? 'Creating account...' : 'Create account'}
-            </button>
-          </div>
+          <TumbleButton
+            type="submit"
+            disabled={loading}
+            className="w-full"
+            size="lg"
+          >
+            {loading ? 'Creating account...' : 'Create account'}
+          </TumbleButton>
 
           <div className="mt-6">
             <div className="relative">
@@ -155,10 +157,11 @@ export default function SignUp() {
             </div>
 
             <div className="mt-6">
-              <button
+              <TumbleButton
                 type="button"
                 onClick={handleGoogleSignIn}
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                variant="outline"
+                className="w-full"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path
@@ -179,7 +182,7 @@ export default function SignUp() {
                   />
                 </svg>
                 <span className="ml-2">Sign up with Google</span>
-              </button>
+              </TumbleButton>
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { 
@@ -68,12 +68,13 @@ export default function AdminOrdersPage() {
     route_type: 'pickup' as 'pickup' | 'delivery'
   })
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!session) return
 
     try {
       setLoading(true)
       setError(null)
+      
       const [ordersData, driversData] = await Promise.all([
         adminApi.getAllOrders(session, { 
           status: statusFilter || undefined,
@@ -91,28 +92,24 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [session, statusFilter, dateFilter])
 
   useEffect(() => {
-    const checkAccessAndLoadData = async () => {
-      if (status === 'loading') return
-      
-      if (!session) {
-        router.push('/auth/signin')
-        return
-      }
-
-      const user = session.user as any
-      if (user.role !== 'admin') {
-        router.push('/dashboard')
-        return
-      }
-
-      await loadData()
+    if (status === 'loading') return
+    
+    if (!session?.user) {
+      router.push('/auth/signin')
+      return
     }
 
-    checkAccessAndLoadData()
-  }, [session, status, router, statusFilter, dateFilter])
+    const user = session.user as any
+    if (user.role !== 'admin') {
+      router.push('/dashboard')
+      return
+    }
+
+    loadData()
+  }, [session, status, router, loadData])
 
   const filteredOrders = orders.filter(order => {
     // Search filter

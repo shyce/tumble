@@ -36,6 +36,7 @@ type Server struct {
 	payments *PaymentHandler
 	driverApps *DriverApplicationHandler
 	driverRoutes *DriverRouteHandler
+	driverEarnings *DriverEarningsHandler
 }
 
 type HealthResponse struct {
@@ -87,6 +88,7 @@ func main() {
 	server.payments = NewPaymentHandler(server.db, server.realtime)
 	server.driverApps = NewDriverApplicationHandler(server.db)
 	server.driverRoutes = NewDriverRouteHandler(server.db, server.realtime)
+	server.driverEarnings = NewDriverEarningsHandler(server.db)
 
 	// Set up HTTP routes with Gorilla Mux
 	r := mux.NewRouter()
@@ -163,6 +165,10 @@ func main() {
 	api.HandleFunc("/driver/routes", server.driverRoutes.requireDriver(server.driverRoutes.handleGetDriverRoutes))
 	api.HandleFunc("/driver/routes/start", server.driverRoutes.requireDriver(server.driverRoutes.handleStartRoute))
 	api.HandleFunc("/driver/route-orders/status", server.driverRoutes.requireDriver(server.driverRoutes.handleUpdateRouteOrderStatus))
+
+	// Driver earnings routes
+	api.HandleFunc("/driver/earnings", server.driverEarnings.requireDriver(server.driverEarnings.handleGetDriverEarnings))
+	api.HandleFunc("/driver/earnings/history", server.driverEarnings.requireDriver(server.driverEarnings.handleGetDriverEarningsHistory))
 
 	// Start Centrifuge node
 	if err := server.centNode.Run(); err != nil {

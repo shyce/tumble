@@ -1,3 +1,5 @@
+import { authFetchWithSession } from './auth-fetch'
+
 const API_BASE_URL = '' // Use relative paths since we're behind nginx
 
 export interface User {
@@ -170,8 +172,6 @@ export interface CostCalculation {
   covered_bags: number
   has_subscription_benefits: boolean
 }
-
-import { authFetchWithSession } from './auth-fetch';
 
 export const authApi = {
   async login(credentials: LoginRequest): Promise<AuthResponse> {
@@ -399,9 +399,104 @@ export const serviceApi = {
   }
 }
 
+export interface RouteOrderStatusRequest {
+  status: 'pending' | 'completed' | 'failed'
+}
+
+export interface EarningsData {
+  today: number
+  thisWeek: number
+  thisMonth: number
+  total: number
+  completedOrders: number
+  averagePerOrder: number
+  hoursWorked: number
+  hourlyRate: number
+}
+
+export interface EarningsHistory {
+  date: string
+  orders: number
+  earnings: number
+  hours: number
+}
+
 export const driverApi = {
   async getRoutes(session: any): Promise<any[]> {
     const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/driver/routes`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async updateRouteOrderStatus(session: any, routeOrderId: number, request: RouteOrderStatusRequest): Promise<{ message: string }> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/driver/route-orders/status?id=${routeOrderId}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getCompletedDeliveries(session: any, params?: { period?: string }): Promise<any[]> {
+    const searchParams = new URLSearchParams()
+    if (params?.period) searchParams.append('period', params.period)
+
+    const url = `${API_BASE_URL}/api/v1/driver/routes${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    const response = await authFetchWithSession(session, url)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    const routes = await response.json()
+    
+    // Filter to only completed route orders and flatten the data
+    const completedDeliveries: any[] = []
+    routes.forEach((route: any) => {
+      route.orders?.forEach((order: any) => {
+        if (order.status === 'completed') {
+          completedDeliveries.push({
+            ...order,
+            route_id: route.id,
+            route_type: route.route_type,
+            route_date: route.route_date,
+            route_status: route.status
+          })
+        }
+      })
+    })
+
+    return completedDeliveries
+  },
+
+  async getEarnings(session: any): Promise<EarningsData> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/driver/earnings`)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getEarningsHistory(session: any, params?: { period?: string }): Promise<EarningsHistory[]> {
+    const searchParams = new URLSearchParams()
+    if (params?.period) searchParams.append('period', params.period)
+
+    const url = `${API_BASE_URL}/api/v1/driver/earnings/history${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    const response = await authFetchWithSession(session, url)
 
     if (!response.ok) {
       const errorText = await response.text()

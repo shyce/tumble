@@ -3,29 +3,32 @@
 import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { Package, MapPin, Clock, CheckCircle, Star, Calendar, Filter } from 'lucide-react'
+import { Package, MapPin, Clock, CheckCircle, Star, Calendar, Filter, Truck } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
+import { driverApi } from '@/lib/api'
 
-interface DeliveryOrder {
+interface CompletedDelivery {
   id: number
+  order_id: number
   customer_name: string
-  pickup_address: string
-  delivery_address: string
-  pickup_time: string
-  delivery_time: string
-  completed_at: string
-  items_count: number
-  total_amount: number
-  customer_rating?: number
-  customer_tip?: number
+  address: string
+  customer_phone?: string
   special_instructions?: string
+  pickup_time_slot?: string
+  delivery_time_slot?: string
+  route_id: number
+  route_type: string
+  route_date: string
+  sequence_number: number
+  status: string
 }
 
 export default function DriverDeliveriesPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [deliveries, setDeliveries] = useState<DeliveryOrder[]>([])
+  const [deliveries, setDeliveries] = useState<CompletedDelivery[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [filterPeriod, setFilterPeriod] = useState<'week' | 'month' | 'all'>('week')
 
   useEffect(() => {
@@ -46,53 +49,16 @@ export default function DriverDeliveriesPage() {
   }, [session, status, router, filterPeriod])
 
   const loadDeliveries = async () => {
+    if (!session) return
+
     try {
-      // Mock data for now - replace with actual API call
-      const mockDeliveries: DeliveryOrder[] = [
-        {
-          id: 1,
-          customer_name: 'Sarah Johnson',
-          pickup_address: '123 Oak St, City Center',
-          delivery_address: '456 Pine Ave, Downtown',
-          pickup_time: '2024-01-15T09:00:00Z',
-          delivery_time: '2024-01-15T17:00:00Z',
-          completed_at: '2024-01-15T16:45:00Z',
-          items_count: 2,
-          total_amount: 89.50,
-          customer_rating: 5,
-          customer_tip: 8.00,
-          special_instructions: 'Ring doorbell, apartment 3B'
-        },
-        {
-          id: 2,
-          customer_name: 'Mike Chen',
-          pickup_address: '789 Elm Dr, Suburbia',
-          delivery_address: '321 Maple Rd, Uptown',
-          pickup_time: '2024-01-14T10:30:00Z',
-          delivery_time: '2024-01-14T18:00:00Z',
-          completed_at: '2024-01-14T17:30:00Z',
-          items_count: 1,
-          total_amount: 45.00,
-          customer_rating: 4,
-          customer_tip: 5.00
-        },
-        {
-          id: 3,
-          customer_name: 'Emily Rodriguez',
-          pickup_address: '555 Cedar Ln, Riverside',
-          delivery_address: '888 Birch St, Hillside',
-          pickup_time: '2024-01-13T14:00:00Z',
-          delivery_time: '2024-01-13T19:30:00Z',
-          completed_at: '2024-01-13T19:15:00Z',
-          items_count: 3,
-          total_amount: 120.75,
-          customer_rating: 5,
-          customer_tip: 12.00
-        }
-      ]
-      setDeliveries(mockDeliveries)
-    } catch (error) {
-      console.error('Error loading deliveries:', error)
+      setLoading(true)
+      setError(null)
+      const deliveriesData = await driverApi.getCompletedDeliveries(session, { period: filterPeriod })
+      setDeliveries(deliveriesData)
+    } catch (err) {
+      console.error('Error loading deliveries:', err)
+      setError('Failed to load deliveries')
     } finally {
       setLoading(false)
     }
@@ -106,170 +72,163 @@ export default function DriverDeliveriesPage() {
     })
   }
 
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+  const getFilterLabel = (period: string) => {
+    switch (period) {
+      case 'week': return 'This Week'
+      case 'month': return 'This Month'
+      case 'all': return 'All Time'
+      default: return period
+    }
   }
 
-  const getTotalEarnings = () => {
-    return deliveries.reduce((total, delivery) => total + (delivery.customer_tip || 0), 0)
-  }
-
-  const getAverageRating = () => {
-    const ratingsDeliveries = deliveries.filter(d => d.customer_rating)
-    if (ratingsDeliveries.length === 0) return 0
-    const sum = ratingsDeliveries.reduce((total, delivery) => total + (delivery.customer_rating || 0), 0)
-    return sum / ratingsDeliveries.length
-  }
-
-  if (loading || status === 'loading') {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading your deliveries...</p>
+        </div>
       </div>
     )
   }
 
   return (
     <>
-      <PageHeader title="My Deliveries" subtitle="View your completed delivery history" />
-      <div>
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white rounded-2xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Deliveries</p>
-                <p className="text-3xl font-bold text-gray-900">{deliveries.length}</p>
-              </div>
-              <Package className="w-8 h-8 text-blue-600" />
-            </div>
-          </div>
+      <PageHeader title="My Deliveries" subtitle="View your completed pickups and deliveries" />
 
-          <div className="bg-white rounded-2xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Tips Earned</p>
-                <p className="text-3xl font-bold text-gray-900">${getTotalEarnings().toFixed(2)}</p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-600" />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Average Rating</p>
-                <p className="text-3xl font-bold text-gray-900">{getAverageRating().toFixed(1)}</p>
-              </div>
-              <Star className="w-8 h-8 text-yellow-500" />
-            </div>
-          </div>
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-700 text-center">{error}</p>
         </div>
+      )}
 
-        {/* Filter and Deliveries List */}
-        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Delivery History</h2>
-              <div className="flex items-center space-x-2">
-                <Filter className="w-4 h-4 text-gray-400" />
-                <select
-                  value={filterPeriod}
-                  onChange={(e) => setFilterPeriod(e.target.value as 'week' | 'month' | 'all')}
-                  className="border border-gray-300 rounded-lg px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="week">Last Week</option>
-                  <option value="month">Last Month</option>
-                  <option value="all">All Time</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="divide-y divide-gray-200">
-            {deliveries.length === 0 ? (
-              <div className="text-center py-12">
-                <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No deliveries found</h3>
-                <p className="text-gray-500">Your completed deliveries will appear here</p>
-              </div>
-            ) : (
-              deliveries.map((delivery) => (
-                <div key={delivery.id} className="p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        Order #{delivery.id} - {delivery.customer_name}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Completed on {formatDate(delivery.completed_at)} at {formatTime(delivery.completed_at)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-gray-900">${delivery.total_amount.toFixed(2)}</p>
-                      {delivery.customer_tip && (
-                        <p className="text-sm text-green-600">+${delivery.customer_tip.toFixed(2)} tip</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="flex items-start space-x-3">
-                      <MapPin className="w-5 h-5 text-blue-600 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">Pickup</p>
-                        <p className="text-sm text-gray-600">{delivery.pickup_address}</p>
-                        <p className="text-xs text-gray-500">{formatTime(delivery.pickup_time)}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start space-x-3">
-                      <MapPin className="w-5 h-5 text-green-600 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">Delivery</p>
-                        <p className="text-sm text-gray-600">{delivery.delivery_address}</p>
-                        <p className="text-xs text-gray-500">{formatTime(delivery.delivery_time)}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center space-x-1">
-                        <Package className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">{delivery.items_count} item{delivery.items_count !== 1 ? 's' : ''}</span>
-                      </div>
-                      {delivery.customer_rating && (
-                        <div className="flex items-center space-x-1">
-                          <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                          <span className="text-sm text-gray-600">{delivery.customer_rating}.0</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {delivery.special_instructions && (
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Special instructions provided</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {delivery.special_instructions && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <p className="text-sm text-yellow-800">
-                        <strong>Instructions:</strong> {delivery.special_instructions}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+      {/* Filter Controls */}
+      <div className="bg-white rounded-2xl p-6 shadow-lg mb-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Delivery History</h3>
+          <div className="flex items-center space-x-2">
+            <Filter className="w-4 h-4 text-slate-500" />
+            <select 
+              value={filterPeriod} 
+              onChange={(e) => setFilterPeriod(e.target.value as 'week' | 'month' | 'all')}
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="all">All Time</option>
+            </select>
           </div>
         </div>
       </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">Total Completed</p>
+              <p className="text-2xl font-bold text-slate-900">{deliveries.length}</p>
+            </div>
+            <CheckCircle className="w-8 h-8 text-green-500" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">Pickups</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {deliveries.filter(d => d.route_type === 'pickup').length}
+              </p>
+            </div>
+            <Package className="w-8 h-8 text-blue-500" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">Deliveries</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {deliveries.filter(d => d.route_type === 'delivery').length}
+              </p>
+            </div>
+            <Truck className="w-8 h-8 text-purple-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Deliveries List */}
+      {deliveries.length === 0 ? (
+        <div className="bg-white rounded-2xl p-12 shadow-lg text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-10 h-10 text-blue-600" />
+          </div>
+          <h3 className="text-xl font-semibold text-slate-800 mb-2">No deliveries yet</h3>
+          <p className="text-slate-600 mb-6">
+            Complete some pickups and deliveries to see them here. Your delivery history for {getFilterLabel(filterPeriod).toLowerCase()} will appear in this section.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {deliveries.map((delivery) => (
+            <div key={`${delivery.route_id}-${delivery.id}`} className="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold ${
+                    delivery.route_type === 'pickup' ? 'bg-blue-500' : 'bg-purple-500'
+                  }`}>
+                    {delivery.route_type === 'pickup' ? <Package className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900">{delivery.customer_name}</h4>
+                    <p className="text-sm text-slate-600">
+                      {delivery.route_type === 'pickup' ? 'Pickup' : 'Delivery'} • Order #{delivery.order_id}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <CheckCircle className="w-3 h-3 mr-1" />
+                    Completed
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">{formatDate(delivery.route_date)}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-start space-x-2">
+                  <MapPin className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">Address</p>
+                    <p className="text-sm text-slate-600">{delivery.address}</p>
+                  </div>
+                </div>
+
+                {(delivery.pickup_time_slot || delivery.delivery_time_slot) && (
+                  <div className="flex items-start space-x-2">
+                    <Clock className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">Time Slot</p>
+                      <p className="text-sm text-slate-600">
+                        {delivery.pickup_time_slot || delivery.delivery_time_slot}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {delivery.special_instructions && (
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-amber-800 mb-1">Special Instructions</p>
+                  <p className="text-sm text-amber-700">{delivery.special_instructions}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   )
 }

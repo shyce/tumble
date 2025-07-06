@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { MapPin, Clock, Package, CheckCircle, Navigation, Phone, Home, Truck, AlertCircle } from 'lucide-react'
+import { MapPin, Clock, Package, CheckCircle, Navigation, Phone, Home, Truck, AlertCircle, PlayCircle, XCircle } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
-import { driverApi } from '@/lib/api'
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { driverApi, RouteOrderStatusRequest } from '@/lib/api'
 
 interface DriverRoute {
   id: number
@@ -50,6 +51,7 @@ export default function DriverRoutesPage() {
   const [routes, setRoutes] = useState<DriverRoute[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null)
 
   useEffect(() => {
     if (status === 'loading') return
@@ -81,6 +83,25 @@ export default function DriverRoutesPage() {
       setError('Failed to load routes')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const updateOrderStatus = async (routeOrderId: number, status: RouteOrderStatusRequest['status']) => {
+    if (!session) return
+    
+    try {
+      setUpdatingOrderId(routeOrderId)
+      setError(null)
+      
+      await driverApi.updateRouteOrderStatus(session, routeOrderId, { status })
+      
+      // Reload routes to show updated status
+      await loadDriverRoutes()
+    } catch (err) {
+      console.error('Error updating order status:', err)
+      setError('Failed to update order status')
+    } finally {
+      setUpdatingOrderId(null)
     }
   }
 
@@ -205,9 +226,47 @@ export default function DriverRoutesPage() {
                           )}
 
                           {order.special_instructions && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
                               <p className="text-sm font-medium text-amber-800 mb-1">Special Instructions</p>
                               <p className="text-sm text-amber-700">{order.special_instructions}</p>
+                            </div>
+                          )}
+
+                          {/* Action Buttons */}
+                          {order.status === 'pending' && (
+                            <div className="flex space-x-2 pt-3 border-t border-slate-200">
+                              <TumbleButton
+                                onClick={() => updateOrderStatus(order.id, 'completed')}
+                                disabled={updatingOrderId === order.id}
+                                variant="default"
+                                size="sm"
+                                className="flex-1"
+                              >
+                                {updatingOrderId === order.id ? (
+                                  <div className="w-4 h-4 border-2 border-slate-800 border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                  <>
+                                    <CheckCircle className="w-4 h-4" />
+                                    <span>Mark Complete</span>
+                                  </>
+                                )}
+                              </TumbleButton>
+                              <TumbleButton
+                                onClick={() => updateOrderStatus(order.id, 'failed')}
+                                disabled={updatingOrderId === order.id}
+                                variant="destructive"
+                                size="sm"
+                                className="flex-1"
+                              >
+                                {updatingOrderId === order.id ? (
+                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                  <>
+                                    <XCircle className="w-4 h-4" />
+                                    <span>Mark Failed</span>
+                                  </>
+                                )}
+                              </TumbleButton>
                             </div>
                           )}
                         </div>

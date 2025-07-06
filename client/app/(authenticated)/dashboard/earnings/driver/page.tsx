@@ -5,24 +5,9 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { DollarSign, TrendingUp, Calendar, Package, Clock, Download, CreditCard } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { driverApi, EarningsData, EarningsHistory } from '@/lib/api'
 
-interface EarningsData {
-  today: number
-  thisWeek: number
-  thisMonth: number
-  total: number
-  completedOrders: number
-  averagePerOrder: number
-  hoursWorked: number
-  hourlyRate: number
-}
-
-interface EarningsHistory {
-  date: string
-  orders: number
-  earnings: number
-  hours: number
-}
 
 export default function DriverEarningsPage() {
   const { data: session, status } = useSession()
@@ -30,6 +15,7 @@ export default function DriverEarningsPage() {
   const [earnings, setEarnings] = useState<EarningsData | null>(null)
   const [history, setHistory] = useState<EarningsHistory[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year'>('week')
 
   useEffect(() => {
@@ -45,35 +31,27 @@ export default function DriverEarningsPage() {
       router.push('/dashboard')
       return
     }
+
+    loadEarnings()
   }, [session, status, router])
 
   const loadEarnings = async () => {
+    if (!session) return
+
     try {
       setLoading(true)
-      // Mock data for now - replace with actual API call
-      const mockEarnings: EarningsData = {
-        today: 125.50,
-        thisWeek: 847.25,
-        thisMonth: 3420.75,
-        total: 12847.90,
-        completedOrders: 156,
-        averagePerOrder: 21.95,
-        hoursWorked: 38.5,
-        hourlyRate: 22.00
-      }
+      setError(null)
       
-      const mockHistory: EarningsHistory[] = [
-        { date: '2024-01-15', orders: 8, earnings: 175.25, hours: 7.5 },
-        { date: '2024-01-14', orders: 12, earnings: 263.80, hours: 8.2 },
-        { date: '2024-01-13', orders: 6, earnings: 132.50, hours: 6.0 },
-        { date: '2024-01-12', orders: 10, earnings: 218.75, hours: 7.8 },
-        { date: '2024-01-11', orders: 9, earnings: 197.40, hours: 7.2 }
-      ]
+      const [earningsData, historyData] = await Promise.all([
+        driverApi.getEarnings(session),
+        driverApi.getEarningsHistory(session, { period: timeRange })
+      ])
       
-      setEarnings(mockEarnings)
-      setHistory(mockHistory)
-    } catch (error) {
-      console.error('Failed to load earnings:', error)
+      setEarnings(earningsData)
+      setHistory(historyData)
+    } catch (err) {
+      console.error('Failed to load earnings:', err)
+      setError('Failed to load earnings data')
     } finally {
       setLoading(false)
     }
@@ -81,12 +59,33 @@ export default function DriverEarningsPage() {
 
   useEffect(() => {
     loadEarnings()
-  }, [])
+  }, [timeRange])
 
   const downloadEarningsReport = () => {
-    // Mock download functionality
-    console.log('Downloading earnings report...')
-    alert('Earnings report download started!')
+    if (!earnings || !history) return
+    
+    // Create CSV content
+    const csvContent = [
+      ['Date', 'Orders', 'Earnings', 'Hours', 'Rate'],
+      ...history.map(day => [
+        day.date,
+        day.orders.toString(),
+        `$${day.earnings.toFixed(2)}`,
+        day.hours.toFixed(1),
+        `$${(day.earnings / day.hours).toFixed(2)}`
+      ])
+    ].map(row => row.join(',')).join('\n')
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `driver_earnings_${timeRange}_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
   }
 
   if (status === 'loading') {
@@ -108,12 +107,23 @@ export default function DriverEarningsPage() {
     )
   }
 
+  if (error) {
+    return (
+      <>
+        <PageHeader title="Driver Earnings" subtitle="Track your income and performance metrics" />
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-700 text-center">{error}</p>
+        </div>
+      </>
+    )
+  }
+
   if (!earnings) {
     return (
       <>
         <PageHeader title="Driver Earnings" subtitle="Track your income and performance metrics" />
         <div className="text-center py-12">
-          <p className="text-gray-500">Unable to load earnings data</p>
+          <p className="text-gray-500">No earnings data available</p>
         </div>
       </>
     )
@@ -125,13 +135,14 @@ export default function DriverEarningsPage() {
       
       <div className="mb-8 flex items-center justify-between">
         <div></div>
-        <button
+        <TumbleButton
           onClick={downloadEarningsReport}
-          className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          variant="default"
+          className="flex items-center space-x-2"
         >
           <Download className="w-4 h-4" />
           <span>Download Report</span>
-        </button>
+        </TumbleButton>
       </div>
 
       {/* Earnings Summary Cards */}

@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { DollarSign, TrendingUp, Calendar, Package, Users, Download, BarChart3 } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
+import { adminApi } from '@/lib/api'
 
 interface CompanyEarningsData {
   todayRevenue: number
@@ -57,48 +58,95 @@ export default function CompanyEarningsPage() {
   }, [session, status, router])
 
   const loadCompanyEarnings = async () => {
+    if (!session) return
+    
     try {
       setLoading(true)
-      // Mock data for now - replace with actual API call
-      const mockEarnings: CompanyEarningsData = {
-        todayRevenue: 2847.50,
-        thisWeekRevenue: 18423.75,
-        thisMonthRevenue: 72890.25,
-        totalRevenue: 234567.80,
-        totalOrders: 1247,
-        activeDrivers: 23,
-        averageOrderValue: 58.45,
-        monthlyGrowth: 12.5
-      }
       
-      const mockMonthlyData: MonthlyData[] = [
-        { month: 'Jan', revenue: 65432.10, orders: 1120, drivers: 18 },
-        { month: 'Feb', revenue: 71250.75, orders: 1285, drivers: 20 },
-        { month: 'Mar', revenue: 68905.50, orders: 1198, drivers: 19 },
-        { month: 'Apr', revenue: 72890.25, orders: 1247, drivers: 23 },
-      ]
+      // Fetch real data from APIs
+      const [ordersSummary, revenueAnalytics, driverStats] = await Promise.all([
+        adminApi.getOrdersSummary(session),
+        adminApi.getRevenueAnalytics(session, timeRange === 'year' ? 'month' : timeRange === 'week' ? 'day' : 'month'),
+        adminApi.getDriverStats(session)
+      ])
 
-      const mockTopDrivers: DriverPerformance[] = [
-        { id: 1, name: 'Alex Johnson', orders: 156, earnings: 3420.75, rating: 4.9 },
-        { id: 2, name: 'Sarah Miller', orders: 142, earnings: 3124.50, rating: 4.8 },
-        { id: 3, name: 'Mike Chen', orders: 134, earnings: 2987.25, rating: 4.7 },
-        { id: 4, name: 'Emma Davis', orders: 128, earnings: 2845.90, rating: 4.8 },
-        { id: 5, name: 'James Wilson', orders: 125, earnings: 2756.40, rating: 4.6 },
-      ]
+      // Calculate real earnings data
+      const earningsData: CompanyEarningsData = {
+        todayRevenue: ordersSummary.today_revenue || 0,
+        thisWeekRevenue: 0, // Calculate from analytics
+        thisMonthRevenue: ordersSummary.total_revenue || 0,
+        totalRevenue: ordersSummary.total_revenue || 0,
+        totalOrders: ordersSummary.total_orders || 0,
+        activeDrivers: driverStats.length || 0,
+        averageOrderValue: ordersSummary.total_orders > 0 ? (ordersSummary.total_revenue / ordersSummary.total_orders) : 0,
+        monthlyGrowth: 0 // Calculate from analytics
+      }
+
+      // Transform revenue analytics to monthly data
+      const monthlyData: MonthlyData[] = revenueAnalytics.map(item => ({
+        month: new Date(item.date).toLocaleDateString('en-US', { month: 'short' }),
+        revenue: item.revenue,
+        orders: item.order_count,
+        drivers: driverStats.length // Simplified - could be more sophisticated
+      }))
+
+      // Calculate week revenue from daily analytics if available
+      const now = new Date()
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      const weeklyRevenue = revenueAnalytics
+        .filter(item => new Date(item.date) >= weekAgo)
+        .reduce((sum, item) => sum + item.revenue, 0)
+      earningsData.thisWeekRevenue = weeklyRevenue
+
+      // Calculate monthly growth
+      if (revenueAnalytics.length >= 2) {
+        const currentMonth = revenueAnalytics[0]?.revenue || 0
+        const lastMonth = revenueAnalytics[1]?.revenue || 0
+        if (lastMonth > 0) {
+          earningsData.monthlyGrowth = ((currentMonth - lastMonth) / lastMonth) * 100
+        }
+      }
+
+      // Transform driver stats to top performers
+      const topDrivers: DriverPerformance[] = driverStats
+        .sort((a, b) => b.total_deliveries - a.total_deliveries)
+        .slice(0, 5)
+        .map(driver => ({
+          id: driver.driver_id,
+          name: driver.driver_name,
+          orders: driver.total_deliveries,
+          earnings: driver.total_deliveries * 25, // Estimated earnings - could be more accurate
+          rating: driver.rating || 4.5
+        }))
       
-      setEarnings(mockEarnings)
-      setMonthlyData(mockMonthlyData)
-      setTopDrivers(mockTopDrivers)
+      setEarnings(earningsData)
+      setMonthlyData(monthlyData.slice(0, 4)) // Show last 4 months
+      setTopDrivers(topDrivers)
     } catch (error) {
       console.error('Failed to load company earnings:', error)
+      // Set empty/default state on error
+      setEarnings({
+        todayRevenue: 0,
+        thisWeekRevenue: 0,
+        thisMonthRevenue: 0,
+        totalRevenue: 0,
+        totalOrders: 0,
+        activeDrivers: 0,
+        averageOrderValue: 0,
+        monthlyGrowth: 0
+      })
+      setMonthlyData([])
+      setTopDrivers([])
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadCompanyEarnings()
-  }, [])
+    if (session) {
+      loadCompanyEarnings()
+    }
+  }, [session, timeRange])
 
   const downloadReport = () => {
     // Mock download functionality

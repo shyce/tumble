@@ -1,7 +1,7 @@
 'use client'
 
 import { useSession, signOut } from 'next-auth/react'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { 
@@ -16,7 +16,13 @@ import {
   CreditCard,
   DollarSign,
   TrendingUp,
-  Users
+  Users,
+  ChevronDown,
+  Map,
+  Truck,
+  Clock,
+  FileText,
+  Shield
 } from 'lucide-react'
 import TumbleLogo from './TumbleLogo'
 
@@ -27,49 +33,119 @@ interface MainNavigationProps {
 export default function MainNavigation({ fullWidth = false }: MainNavigationProps) {
   const { data: session } = useSession()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const pathname = usePathname()
   const user = session?.user as any
+  const navRef = useRef<HTMLDivElement>(null)
 
   const handleSignOut = async () => {
     await signOut({ redirect: true, callbackUrl: '/' })
   }
 
-  const getDashboardLinks = () => {
-    const baseLinks = [
-      { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(event.target as Node)) {
+        setOpenDropdown(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+
+  const getNavigationStructure = () => {
+    const baseItems = [
+      { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', type: 'link' as const }
     ]
 
-    if (user?.role === 'driver') {
+    if (user?.role === 'admin') {
       return [
-        ...baseLinks,
-        { href: '/dashboard/routes', icon: Calendar, label: 'Routes' },
-        { href: '/dashboard/earnings/driver', icon: DollarSign, label: 'Earnings' },
-        { href: '/dashboard/deliveries', icon: Package, label: 'Deliveries' },
-        { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
+        ...baseItems,
+        {
+          label: 'Management',
+          icon: Shield,
+          type: 'dropdown' as const,
+          items: [
+            { href: '/dashboard/users', icon: Users, label: 'Users' },
+            { href: '/dashboard/admin/orders', icon: Package, label: 'Orders' },
+            { href: '/dashboard/driver-applications', icon: FileText, label: 'Driver Applications' },
+          ]
+        },
+        {
+          label: 'Analytics',
+          icon: TrendingUp,
+          type: 'dropdown' as const,
+          items: [
+            { href: '/dashboard/earnings/company', icon: TrendingUp, label: 'Revenue Reports' },
+          ]
+        },
+        { href: '/dashboard/settings', icon: Settings, label: 'Settings', type: 'link' as const },
       ]
-    } else if (user?.role === 'admin') {
+    } else if (user?.role === 'driver') {
       return [
-        ...baseLinks,
-        { href: '/dashboard/users', icon: Users, label: 'Users' },
-        { href: '/dashboard/admin/orders', icon: Package, label: 'Orders' },
-        { href: '/dashboard/earnings/company', icon: TrendingUp, label: 'Revenue' },
-        { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
+        ...baseItems,
+        {
+          label: 'Customer',
+          icon: Package,
+          type: 'dropdown' as const,
+          items: [
+            { href: '/dashboard/schedule', icon: Calendar, label: 'Schedule Pickup' },
+            { href: '/dashboard/orders', icon: Package, label: 'My Orders' },
+            { href: '/dashboard/subscription', icon: CreditCard, label: 'Subscription' },
+          ]
+        },
+        {
+          label: 'Driver',
+          icon: Truck,
+          type: 'dropdown' as const,
+          items: [
+            { href: '/dashboard/routes', icon: Map, label: 'My Routes' },
+            { href: '/dashboard/earnings/driver', icon: DollarSign, label: 'Earnings' },
+            { href: '/dashboard/deliveries', icon: Truck, label: 'Deliveries' },
+            { href: '/dashboard/driver-schedule', icon: Clock, label: 'Schedule' },
+          ]
+        },
+        { href: '/dashboard/settings', icon: Settings, label: 'Settings', type: 'link' as const },
       ]
     } else {
       return [
-        ...baseLinks,
-        { href: '/dashboard/schedule', icon: Calendar, label: 'Schedule' },
-        { href: '/dashboard/orders', icon: Package, label: 'Orders' },
-        { href: '/dashboard/subscription', icon: CreditCard, label: 'Subscription' },
-        { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
+        ...baseItems,
+        { href: '/dashboard/schedule', icon: Calendar, label: 'Schedule', type: 'link' as const },
+        { href: '/dashboard/orders', icon: Package, label: 'Orders', type: 'link' as const },
+        { href: '/dashboard/subscription', icon: CreditCard, label: 'Subscription', type: 'link' as const },
+        { href: '/dashboard/settings', icon: Settings, label: 'Settings', type: 'link' as const },
       ]
     }
   }
 
-  const dashboardLinks = getDashboardLinks()
+  const navigationItems = getNavigationStructure()
+
+  const toggleDropdown = (label: string) => {
+    setOpenDropdown(openDropdown === label ? null : label)
+  }
+
+  const isPathActive = (href: string) => {
+    if (href === '/dashboard') {
+      return pathname === '/dashboard'
+    }
+    if (href.includes('/earnings')) {
+      return pathname.startsWith('/dashboard/earnings')
+    }
+    if (href.includes('/admin/orders')) {
+      return pathname.startsWith('/dashboard/admin/orders')
+    }
+    return pathname === href
+  }
+
+  const isDropdownActive = (items: any[]) => {
+    return items.some(item => isPathActive(item.href))
+  }
 
   return (
-    <nav className="bg-white/90 backdrop-blur-xl border-b border-white/20 shadow-lg sticky top-0 z-50">
+    <nav ref={navRef} className="bg-white/90 backdrop-blur-xl border-b border-white/20 shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           {/* Logo */}
@@ -85,34 +161,85 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
           {/* Desktop Navigation Links */}
           {user && (
             <div className="hidden md:flex items-center space-x-1">
-              {dashboardLinks.map((link) => {
-                const Icon = link.icon
-                const isActive = link.href === '/dashboard' 
-                  ? pathname === '/dashboard'
-                  : link.href.includes('/earnings') 
-                    ? pathname.startsWith('/dashboard/earnings')
-                    : link.href.includes('/admin/orders')
-                      ? pathname.startsWith('/dashboard/admin/orders')
-                      : pathname === link.href
-                
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      isActive
-                        ? `${
-                            user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
-                            user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                            'bg-teal-100 text-teal-700'
-                          } shadow-sm`
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span className="hidden lg:inline">{link.label}</span>
-                  </Link>
-                )
+              {navigationItems.map((item) => {
+                if (item.type === 'link') {
+                  const Icon = item.icon
+                  const isActive = isPathActive(item.href)
+                  
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isActive
+                          ? `${
+                              user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
+                              user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                              'bg-teal-100 text-teal-700'
+                            } shadow-sm`
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span className="hidden lg:inline">{item.label}</span>
+                    </Link>
+                  )
+                } else {
+                  // Dropdown menu
+                  const Icon = item.icon
+                  const isActive = isDropdownActive(item.items)
+                  const isOpen = openDropdown === item.label
+                  
+                  return (
+                    <div key={item.label} className="relative">
+                      <button
+                        onClick={() => toggleDropdown(item.label)}
+                        className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                          isActive
+                            ? `${
+                                user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
+                                user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                                'bg-teal-100 text-teal-700'
+                              } shadow-sm`
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span className="hidden lg:inline">{item.label}</span>
+                        <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      
+                      {isOpen && (
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
+                          {item.items.map((subItem) => {
+                            const SubIcon = subItem.icon
+                            const isSubActive = isPathActive(subItem.href)
+                            
+                            return (
+                              <Link
+                                key={subItem.href}
+                                href={subItem.href}
+                                onClick={() => setOpenDropdown(null)}
+                                className={`flex items-center space-x-3 px-3 py-2 text-sm transition-colors ${
+                                  isSubActive
+                                    ? `${
+                                        user.role === 'driver' ? 'bg-blue-50 text-blue-700' :
+                                        user.role === 'admin' ? 'bg-purple-50 text-purple-700' :
+                                        'bg-teal-50 text-teal-700'
+                                      }`
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <SubIcon className="w-4 h-4" />
+                                <span>{subItem.label}</span>
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
               })}
             </div>
           )}
@@ -189,35 +316,69 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
         {user && mobileMenuOpen && (
           <div className="md:hidden border-t border-slate-200 py-4">
             <div className="space-y-2">
-              {dashboardLinks.map((link) => {
-                const Icon = link.icon
-                const isActive = link.href === '/dashboard' 
-                  ? pathname === '/dashboard'
-                  : link.href.includes('/earnings') 
-                    ? pathname.startsWith('/dashboard/earnings')
-                    : link.href.includes('/admin/orders')
-                      ? pathname.startsWith('/dashboard/admin/orders')
-                      : pathname === link.href
-                
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      isActive
-                        ? `${
-                            user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
-                            user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                            'bg-teal-100 text-teal-700'
-                          } shadow-sm`
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span>{link.label}</span>
-                  </Link>
-                )
+              {navigationItems.map((item) => {
+                if (item.type === 'link') {
+                  const Icon = item.icon
+                  const isActive = isPathActive(item.href)
+                  
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isActive
+                          ? `${
+                              user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
+                              user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                              'bg-teal-100 text-teal-700'
+                            } shadow-sm`
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                  )
+                } else {
+                  // Mobile: Show section header + items
+                  return (
+                    <div key={item.label} className="space-y-2">
+                      <div className="px-3 py-2">
+                        <div className="flex items-center space-x-2">
+                          <item.icon className="w-4 h-4 text-slate-500" />
+                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            {item.label}
+                          </span>
+                        </div>
+                      </div>
+                      {item.items.map((subItem) => {
+                        const SubIcon = subItem.icon
+                        const isActive = isPathActive(subItem.href)
+                        
+                        return (
+                          <Link
+                            key={subItem.href}
+                            href={subItem.href}
+                            onClick={() => setMobileMenuOpen(false)}
+                            className={`flex items-center space-x-3 px-6 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                              isActive
+                                ? `${
+                                    user.role === 'driver' ? 'bg-blue-100 text-blue-700' :
+                                    user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                                    'bg-teal-100 text-teal-700'
+                                  } shadow-sm`
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                            }`}
+                          >
+                            <SubIcon className="w-4 h-4" />
+                            <span>{subItem.label}</span>
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )
+                }
               })}
             </div>
 

@@ -533,6 +533,13 @@ export interface DriverStats {
   rating: number
 }
 
+export interface RevenueAnalytics {
+  date: string
+  revenue: number
+  order_count: number
+  average_order_value: number
+}
+
 export const adminApi = {
   async getOrdersSummary(session: any): Promise<any> {
     const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/summary`)
@@ -612,6 +619,21 @@ export const adminApi = {
       method: 'PUT',
       body: JSON.stringify({ role }),
     })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getRevenueAnalytics(session: any, period?: 'day' | 'week' | 'month'): Promise<RevenueAnalytics[]> {
+    const searchParams = new URLSearchParams()
+    if (period) searchParams.append('period', period)
+
+    const url = `${API_BASE_URL}/api/v1/admin/analytics/revenue${searchParams.toString() ? '?' + searchParams.toString() : ''}`
+    const response = await authFetchWithSession(session, url)
 
     if (!response.ok) {
       const errorText = await response.text()

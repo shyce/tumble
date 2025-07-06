@@ -29,16 +29,19 @@ interface CustomerData {
     status: string
   }
   nextPickup: string | null
+  recentOrders: any[]
 }
 
 interface DriverData {
   todayRoutes: number
   weeklyEarnings: number
+  recentDeliveries: any[]
 }
 
 interface AdminData {
   totalUsers: number
   activeOrders: number
+  recentActivity: any[]
 }
 
 export default function Dashboard() {
@@ -87,29 +90,54 @@ export default function Dashboard() {
             new Date(a.pickup_date).getTime() - new Date(b.pickup_date).getTime()
           )[0]
 
+          // Get recent orders (last 5)
+          const recentOrders = orders
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 5)
+
           setCustomerData({
             subscription: {
               plan: subscription?.plan?.name || null,
               status: subscription?.status || 'inactive'
             },
-            nextPickup: nextPickupOrder?.pickup_date || null
+            nextPickup: nextPickupOrder?.pickup_date || null,
+            recentOrders
           })
         } else if (user.role === 'driver') {
           // Fetch driver routes and calculate stats
           const routes = await driverApi.getRoutes(session)
           
           // Calculate today's routes
-          const today = new Date().toISOString().split('T')[0]
+          const todayStr = new Date().toISOString().split('T')[0]
           const todayRoutes = routes.filter(route => 
-            route.scheduled_date?.startsWith(today)
+            route.scheduled_date?.startsWith(todayStr)
           ).length
 
-          // Calculate weekly earnings (mock for now since earnings aren't in routes)
-          const weeklyEarnings = 0 // TODO: Implement earnings calculation
+          // Get weekly earnings from the earnings API
+          let weeklyEarnings = 0
+          try {
+            const earningsData = await driverApi.getEarnings(session)
+            weeklyEarnings = earningsData.thisWeek || 0
+          } catch (error) {
+            console.error('Failed to fetch earnings:', error)
+          }
+
+          // Get recent deliveries - include past routes and routes with orders
+          const currentDate = new Date()
+          const recentRoutes = routes
+            .filter(route => {
+              const routeDate = new Date(route.route_date)
+              // Include routes from the past week and routes with orders
+              const weekAgo = new Date(currentDate.getTime() - 7 * 24 * 60 * 60 * 1000)
+              return routeDate >= weekAgo && (route.orders?.length > 0 || routeDate < currentDate)
+            })
+            .sort((a, b) => new Date(b.route_date).getTime() - new Date(a.route_date).getTime())
+            .slice(0, 5)
 
           setDriverData({
             todayRoutes,
-            weeklyEarnings
+            weeklyEarnings,
+            recentDeliveries: recentRoutes
           })
         } else if (user.role === 'admin') {
           // Fetch admin data using existing endpoints
@@ -118,9 +146,31 @@ export default function Dashboard() {
             adminApi.getOrdersSummary(session)
           ])
 
+          // Get recent activity (recent orders and user registrations)
+          const recentOrders = await adminApi.getAllOrders(session, { limit: 3 })
+          const recentUsers = users
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 2)
+            .map(user => ({
+              type: 'user_registration',
+              description: `New ${user.role} registered: ${user.email}`,
+              timestamp: user.created_at
+            }))
+
+          const recentOrderActivity = recentOrders.slice(0, 3).map(order => ({
+            type: 'order_update',
+            description: `Order ${order.id} - ${order.status}`,
+            timestamp: order.updated_at || order.created_at
+          }))
+
+          const recentActivity = [...recentOrderActivity, ...recentUsers]
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .slice(0, 5)
+
           setAdminData({
             totalUsers: users.length,
-            activeOrders: ordersSummary.active_orders || 0
+            activeOrders: ordersSummary.active_orders || 0,
+            recentActivity
           })
         }
       } catch (error) {
@@ -130,12 +180,13 @@ export default function Dashboard() {
         if (user.role === 'customer' || !user.role) {
           setCustomerData({
             subscription: { plan: null, status: 'inactive' },
-            nextPickup: null
+            nextPickup: null,
+            recentOrders: []
           })
         } else if (user.role === 'driver') {
-          setDriverData({ todayRoutes: 0, weeklyEarnings: 0 })
+          setDriverData({ todayRoutes: 0, weeklyEarnings: 0, recentDeliveries: [] })
         } else if (user.role === 'admin') {
-          setAdminData({ totalUsers: 0, activeOrders: 0 })
+          setAdminData({ totalUsers: 0, activeOrders: 0, recentActivity: [] })
         }
       } finally {
         setLoading(false)
@@ -603,25 +654,162 @@ export default function Dashboard() {
                     Recent Activity
                   </h3>
                   
-                  <div className="text-center py-8">
-                    <div className={`w-16 h-16 bg-gradient-to-br ${
-                      user.role === 'driver' ? 'from-blue-100 to-indigo-100' :
-                      user.role === 'admin' ? 'from-purple-100 to-indigo-100' :
-                      'from-teal-100 to-emerald-100'
-                    } rounded-full flex items-center justify-center mx-auto mb-4`}>
-                      <Truck className={`w-8 h-8 ${
-                        user.role === 'driver' ? 'text-blue-600' :
-                        user.role === 'admin' ? 'text-purple-600' :
-                        'text-teal-600'
-                      }`} />
+                  {loading ? (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="flex items-center space-x-3 py-2">
+                          <div className="w-8 h-8 bg-slate-200 animate-pulse rounded-full"></div>
+                          <div className="flex-1">
+                            <div className="w-3/4 h-3 bg-slate-200 animate-pulse rounded mb-1"></div>
+                            <div className="w-1/2 h-2 bg-slate-200 animate-pulse rounded"></div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <p className="text-sm font-medium text-slate-700">
-                      No recent {user.role === 'driver' ? 'deliveries' : 'orders'}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Your {user.role === 'driver' ? 'delivery' : 'order'} history will appear here
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {user.role === 'customer' || !user.role ? (
+                        customerData?.recentOrders?.length ? (
+                          customerData.recentOrders.map((order, index) => (
+                            <div key={order.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                  order.status === 'completed' ? 'bg-emerald-100' :
+                                  order.status === 'in_progress' ? 'bg-blue-100' :
+                                  order.status === 'scheduled' ? 'bg-yellow-100' :
+                                  'bg-slate-100'
+                                }`}>
+                                  {order.status === 'completed' ? (
+                                    <CheckCircle className="w-5 h-5 text-emerald-600" />
+                                  ) : order.status === 'in_progress' ? (
+                                    <Clock className="w-5 h-5 text-blue-600" />
+                                  ) : (
+                                    <Package className="w-5 h-5 text-yellow-600" />
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    Order #{order.id}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {new Date(order.created_at).toLocaleDateString()} • ${order.total || '0.00'}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                order.status === 'completed' ? 'bg-emerald-500 text-white' :
+                                order.status === 'in_progress' ? 'bg-blue-500 text-white' :
+                                order.status === 'scheduled' ? 'bg-yellow-500 text-white' :
+                                'bg-slate-500 text-white'
+                              }`}>
+                                {order.status === 'completed' ? 'Done' :
+                                 order.status === 'in_progress' ? 'Active' :
+                                 order.status === 'scheduled' ? 'Scheduled' :
+                                 order.status}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-6">
+                            <div className="w-12 h-12 bg-gradient-to-br from-teal-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                              <Package className="w-6 h-6 text-teal-600" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-700">No recent orders</p>
+                            <p className="text-xs text-slate-500 mt-1">Your order history will appear here</p>
+                          </div>
+                        )
+                      ) : user.role === 'driver' ? (
+                        driverData?.recentDeliveries?.length ? (
+                          driverData.recentDeliveries.map((delivery, index) => {
+                            const routeDate = new Date(delivery.route_date)
+                            const isCompleted = routeDate < new Date() // Past routes are considered completed
+                            const displayStatus = isCompleted ? 'completed' : delivery.status
+                            
+                            return (
+                              <div key={delivery.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                                <div className="flex items-center space-x-3">
+                                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                    isCompleted ? 'bg-emerald-100' : 
+                                    displayStatus === 'in_progress' ? 'bg-blue-100' : 'bg-yellow-100'
+                                  }`}>
+                                    {isCompleted ? (
+                                      <CheckCircle className="w-5 h-5 text-emerald-600" />
+                                    ) : displayStatus === 'in_progress' ? (
+                                      <Clock className="w-5 h-5 text-blue-600" />
+                                    ) : (
+                                      <Calendar className="w-5 h-5 text-yellow-600" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-900 capitalize">
+                                      {delivery.route_type} Route
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {routeDate.toLocaleDateString()} • {delivery.orders?.length || 0} orders
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                  isCompleted ? 'bg-emerald-500 text-white' :
+                                  displayStatus === 'in_progress' ? 'bg-blue-500 text-white' :
+                                  'bg-yellow-500 text-white'
+                                }`}>
+                                  {isCompleted ? 'Done' : displayStatus === 'in_progress' ? 'Active' : 'Scheduled'}
+                                </span>
+                              </div>
+                            )
+                          })
+                        ) : (
+                          <div className="text-center py-6">
+                            <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                              <Truck className="w-6 h-6 text-blue-600" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-700">No recent deliveries</p>
+                            <p className="text-xs text-slate-500 mt-1">Your delivery history will appear here</p>
+                          </div>
+                        )
+                      ) : (
+                        adminData?.recentActivity?.length ? (
+                          adminData.recentActivity.map((activity, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                  activity.type === 'user_registration' ? 'bg-purple-100' : 'bg-indigo-100'
+                                }`}>
+                                  {activity.type === 'user_registration' ? (
+                                    <Users className="w-5 h-5 text-purple-600" />
+                                  ) : (
+                                    <Package className="w-5 h-5 text-indigo-600" />
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {activity.type === 'user_registration' ? 'New User' : 'Order Update'}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {new Date(activity.timestamp).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                activity.type === 'user_registration' ? 'bg-purple-500 text-white' : 'bg-indigo-500 text-white'
+                              }`}>
+                                {activity.type === 'user_registration' ? 'New' : 'Updated'}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-6">
+                            <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                              <TrendingUp className="w-6 h-6 text-purple-600" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-700">No recent activity</p>
+                            <p className="text-xs text-slate-500 mt-1">Platform activity will appear here</p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestAdminHandler_RequireAdmin(t *testing.T) {
@@ -246,11 +248,16 @@ func TestAdminHandler_UpdateUserRole(t *testing.T) {
 			
 			url := "/api/admin/users/role"
 			if tt.userID > 0 {
-				url += fmt.Sprintf("?id=%d", tt.userID)
+				url = fmt.Sprintf("/api/admin/users/%d/role", tt.userID)
 			}
 			
 			req := httptest.NewRequest("PUT", url, bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
+			
+			// Need to set up mux vars since we're testing the handler directly
+			if tt.userID > 0 {
+				req = mux.SetURLVars(req, map[string]string{"id": fmt.Sprintf("%d", tt.userID)})
+			}
 			
 			w := httptest.NewRecorder()
 			handler.handleUpdateUserRole(w, req)

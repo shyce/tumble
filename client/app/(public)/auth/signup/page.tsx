@@ -7,6 +7,7 @@ import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
 import { TumbleInput } from '@/components/ui/tumble-input'
 import { TumbleButton } from '@/components/ui/tumble-button'
+import { tumbleToast } from '@/components/ui/tumble-toast'
 import { authApi } from '@/lib/api'
 
 export default function SignUp() {
@@ -18,13 +19,11 @@ export default function SignUp() {
     phone: '',
   })
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setError('')
 
     try {
       // First register the user
@@ -55,12 +54,13 @@ export default function SignUp() {
       })
 
       if (result?.error) {
-        setError('Registration successful but sign in failed. Please try signing in.')
+        tumbleToast.error('Registration successful', result.code as string || 'Sign in failed. Please try signing in manually.')
       } else {
+        tumbleToast.success('Welcome to Tumble!', 'Your account has been created successfully.')
         router.push('/dashboard')
       }
     } catch (error: any) {
-      setError(error.message || 'An error occurred. Please try again.')
+      tumbleToast.error('Registration failed', error.message || 'An error occurred. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -132,10 +132,6 @@ export default function SignUp() {
               onChange={handleChange}
             />
           </div>
-
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
 
           <TumbleButton
             type="submit"

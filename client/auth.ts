@@ -1,5 +1,6 @@
 import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
+import { InvalidLoginError } from "./lib/auth-errors"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -10,7 +11,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
       authorize: async (credentials) => {
         if (!credentials?.email || !credentials?.password) {
-          return null
+          throw new Error("Email and password are required")
         }
 
         try {
@@ -26,14 +27,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           })
 
           if (!response.ok) {
-            return null
+            const errorText = await response.text()
+            throw new Error(errorText || "Authentication failed")
           }
 
           const data = await response.json()
           
           // Check user status - backend already handles this, but we include it for session management
           if (data.user.status !== 'active') {
-            return null // This should not happen as backend rejects inactive users
+            throw new Error("Account is not active")
           }
 
           return {
@@ -46,8 +48,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             last_name: data.user.last_name,
             accessToken: data.token,
           }
-        } catch {
-          return null
+        } catch (error: any) {
+          throw new InvalidLoginError(error.message || "Authentication failed")
         }
       }
     })
@@ -81,4 +83,5 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: '/auth/signin',
     error: '/auth/error',
   },
+  debug: process.env.NODE_ENV === 'development',
 })

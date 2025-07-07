@@ -7,18 +7,17 @@ import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
 import { TumbleInput } from '@/components/ui/tumble-input'
 import { TumbleButton } from '@/components/ui/tumble-button'
+import { tumbleToast } from '@/components/ui/tumble-toast'
 
 export default function SignIn() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setError('')
 
     try {
       const result = await signIn('credentials', {
@@ -28,12 +27,13 @@ export default function SignIn() {
       })
 
       if (result?.error) {
-        setError('Invalid credentials')
+        tumbleToast.error('Sign in failed', result.code as string)
       } else {
+        tumbleToast.success('Welcome back!', 'You have been signed in successfully.')
         router.push('/dashboard')
       }
     } catch (error: any) {
-      setError('An error occurred. Please try again.')
+      tumbleToast.error('Sign in failed', 'An unexpected error occurred. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -73,9 +73,6 @@ export default function SignIn() {
             />
           </div>
 
-          {error && (
-            <div className="text-red-500 text-sm text-center">{error}</div>
-          )}
 
           <TumbleButton
             type="submit"

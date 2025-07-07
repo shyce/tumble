@@ -82,6 +82,7 @@ type User struct {
 	LastName        string    `json:"last_name"`
 	Phone           *string   `json:"phone"`
 	Role            string    `json:"role"`
+	Status          string    `json:"status"`
 	GoogleID        *string   `json:"google_id,omitempty"`
 	AvatarURL       *string   `json:"avatar_url,omitempty"`
 	EmailVerifiedAt *time.Time `json:"email_verified_at"`
@@ -167,14 +168,14 @@ func (h *AuthHandler) checkPassword(password, hash string) bool {
 
 func (h *AuthHandler) getUserByID(userID int) (*User, error) {
 	query := `
-		SELECT id, email, first_name, last_name, phone, role, google_id, avatar_url, email_verified_at, created_at
+		SELECT id, email, first_name, last_name, phone, role, status, google_id, avatar_url, email_verified_at, created_at
 		FROM users WHERE id = $1
 	`
 	
 	user := &User{}
 	err := h.db.QueryRow(query, userID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
-		&user.Phone, &user.Role, &user.GoogleID, &user.AvatarURL,
+		&user.Phone, &user.Role, &user.Status, &user.GoogleID, &user.AvatarURL,
 		&user.EmailVerifiedAt, &user.CreatedAt,
 	)
 	
@@ -339,6 +340,21 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := h.getUserByID(userID)
 	if err != nil {
 		http.Error(w, "Error retrieving user", http.StatusInternalServerError)
+		return
+	}
+
+	// Check user status
+	if user.Status != "active" {
+		var message string
+		switch user.Status {
+		case "inactive":
+			message = "Your account is currently inactive. Please contact support for assistance."
+		case "suspended":
+			message = "Your account has been suspended. Please contact support for assistance."
+		default:
+			message = "Your account status does not allow login. Please contact support."
+		}
+		http.Error(w, message, http.StatusForbidden)
 		return
 	}
 

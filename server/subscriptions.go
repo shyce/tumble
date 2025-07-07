@@ -50,6 +50,42 @@ type UpdateSubscriptionRequest struct {
 	PlanID *int   `json:"plan_id,omitempty"`
 }
 
+// SubscriptionPreferences represents user preferences for recurring orders
+type SubscriptionPreferences struct {
+	ID                       int              `json:"id"`
+	UserID                   int              `json:"user_id"`
+	DefaultPickupAddressID   *int             `json:"default_pickup_address_id"`
+	DefaultDeliveryAddressID *int             `json:"default_delivery_address_id"`
+	PreferredPickupTimeSlot  string           `json:"preferred_pickup_time_slot"`
+	PreferredDeliveryTimeSlot string          `json:"preferred_delivery_time_slot"`
+	PreferredPickupDay       string           `json:"preferred_pickup_day"`
+	DefaultServices          []ServiceRequest `json:"default_services"`
+	AutoScheduleEnabled      bool             `json:"auto_schedule_enabled"`
+	LeadTimeDays             int              `json:"lead_time_days"`
+	SpecialInstructions      string           `json:"special_instructions"`
+	CreatedAt                time.Time        `json:"created_at"`
+	UpdatedAt                time.Time        `json:"updated_at"`
+}
+
+// ServiceRequest represents a service selection for recurring orders
+type ServiceRequest struct {
+	ServiceID int `json:"service_id"`
+	Quantity  int `json:"quantity"`
+}
+
+// CreateSubscriptionPreferencesRequest represents the request body for creating preferences
+type CreateSubscriptionPreferencesRequest struct {
+	DefaultPickupAddressID   *int             `json:"default_pickup_address_id"`
+	DefaultDeliveryAddressID *int             `json:"default_delivery_address_id"`
+	PreferredPickupTimeSlot  string           `json:"preferred_pickup_time_slot"`
+	PreferredDeliveryTimeSlot string          `json:"preferred_delivery_time_slot"`
+	PreferredPickupDay       string           `json:"preferred_pickup_day"`
+	DefaultServices          []ServiceRequest `json:"default_services"`
+	AutoScheduleEnabled      bool             `json:"auto_schedule_enabled"`
+	LeadTimeDays             int              `json:"lead_time_days"`
+	SpecialInstructions      string           `json:"special_instructions"`
+}
+
 func NewSubscriptionHandler(db *sql.DB) *SubscriptionHandler {
 	return &SubscriptionHandler{
 		db:        db,
@@ -494,4 +530,169 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(usage)
+}
+
+// handleGetSubscriptionPreferences retrieves user's subscription preferences
+func (h *SubscriptionHandler) handleGetSubscriptionPreferences(w http.ResponseWriter, r *http.Request) {
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var prefs SubscriptionPreferences
+	var defaultServicesJSON []byte
+
+	err = h.db.QueryRow(`
+		SELECT id, user_id, default_pickup_address_id, default_delivery_address_id,
+			   preferred_pickup_time_slot, preferred_delivery_time_slot, preferred_pickup_day,
+			   default_services, auto_schedule_enabled, lead_time_days, special_instructions,
+			   created_at, updated_at
+		FROM subscription_preferences
+		WHERE user_id = $1
+	`, userID).Scan(
+		&prefs.ID, &prefs.UserID, &prefs.DefaultPickupAddressID, &prefs.DefaultDeliveryAddressID,
+		&prefs.PreferredPickupTimeSlot, &prefs.PreferredDeliveryTimeSlot, &prefs.PreferredPickupDay,
+		&defaultServicesJSON, &prefs.AutoScheduleEnabled, &prefs.LeadTimeDays, &prefs.SpecialInstructions,
+		&prefs.CreatedAt, &prefs.UpdatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Get standard_bag service ID for default
+			var standardBagServiceID int
+			err = h.db.QueryRow("SELECT id FROM services WHERE name = 'standard_bag' AND is_active = true LIMIT 1").Scan(&standardBagServiceID)
+			if err != nil {
+				http.Error(w, "Standard bag service not found", http.StatusInternalServerError)
+				return
+			}
+			
+			// Return default preferences if none exist
+			prefs = SubscriptionPreferences{
+				UserID:                   userID,
+				PreferredPickupTimeSlot:  "8:00 AM - 12:00 PM",
+				PreferredDeliveryTimeSlot: "8:00 AM - 12:00 PM",
+				PreferredPickupDay:       "monday",
+				DefaultServices:          []ServiceRequest{{ServiceID: standardBagServiceID, Quantity: 1}}, // Default to 1 standard bag
+				AutoScheduleEnabled:      true,
+				LeadTimeDays:             1,
+				SpecialInstructions:      "",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(prefs)
+			return
+		}
+		http.Error(w, "Failed to retrieve preferences", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the default services JSON
+	if len(defaultServicesJSON) > 0 {
+		err = json.Unmarshal(defaultServicesJSON, &prefs.DefaultServices)
+		if err != nil {
+			http.Error(w, "Failed to parse default services", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prefs)
+}
+
+// handleCreateOrUpdateSubscriptionPreferences creates or updates user's subscription preferences
+func (h *SubscriptionHandler) handleCreateOrUpdateSubscriptionPreferences(w http.ResponseWriter, r *http.Request) {
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req CreateSubscriptionPreferencesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.PreferredPickupTimeSlot == "" {
+		req.PreferredPickupTimeSlot = "8:00 AM - 12:00 PM"
+	}
+	if req.PreferredDeliveryTimeSlot == "" {
+		req.PreferredDeliveryTimeSlot = "8:00 AM - 12:00 PM"
+	}
+	if req.PreferredPickupDay == "" {
+		req.PreferredPickupDay = "monday"
+	}
+	if req.LeadTimeDays == 0 {
+		req.LeadTimeDays = 1
+	}
+	if req.DefaultServices == nil {
+		// Get standard_bag service ID for default
+		var standardBagServiceID int
+		err = h.db.QueryRow("SELECT id FROM services WHERE name = 'standard_bag' AND is_active = true LIMIT 1").Scan(&standardBagServiceID)
+		if err != nil {
+			http.Error(w, "Standard bag service not found", http.StatusInternalServerError)
+			return
+		}
+		req.DefaultServices = []ServiceRequest{{ServiceID: standardBagServiceID, Quantity: 1}}
+	}
+
+	// Validate addresses exist and belong to user
+	if req.DefaultPickupAddressID != nil {
+		var count int
+		err = h.db.QueryRow("SELECT COUNT(*) FROM addresses WHERE id = $1 AND user_id = $2", 
+			*req.DefaultPickupAddressID, userID).Scan(&count)
+		if err != nil || count == 0 {
+			http.Error(w, "Invalid pickup address", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.DefaultDeliveryAddressID != nil {
+		var count int
+		err = h.db.QueryRow("SELECT COUNT(*) FROM addresses WHERE id = $1 AND user_id = $2", 
+			*req.DefaultDeliveryAddressID, userID).Scan(&count)
+		if err != nil || count == 0 {
+			http.Error(w, "Invalid delivery address", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Convert default services to JSON
+	defaultServicesJSON, err := json.Marshal(req.DefaultServices)
+	if err != nil {
+		http.Error(w, "Failed to process default services", http.StatusInternalServerError)
+		return
+	}
+
+	// Use UPSERT to create or update preferences
+	_, err = h.db.Exec(`
+		INSERT INTO subscription_preferences (
+			user_id, default_pickup_address_id, default_delivery_address_id,
+			preferred_pickup_time_slot, preferred_delivery_time_slot, preferred_pickup_day,
+			default_services, auto_schedule_enabled, lead_time_days, special_instructions
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (user_id) DO UPDATE SET
+			default_pickup_address_id = EXCLUDED.default_pickup_address_id,
+			default_delivery_address_id = EXCLUDED.default_delivery_address_id,
+			preferred_pickup_time_slot = EXCLUDED.preferred_pickup_time_slot,
+			preferred_delivery_time_slot = EXCLUDED.preferred_delivery_time_slot,
+			preferred_pickup_day = EXCLUDED.preferred_pickup_day,
+			default_services = EXCLUDED.default_services,
+			auto_schedule_enabled = EXCLUDED.auto_schedule_enabled,
+			lead_time_days = EXCLUDED.lead_time_days,
+			special_instructions = EXCLUDED.special_instructions,
+			updated_at = CURRENT_TIMESTAMP
+	`, userID, req.DefaultPickupAddressID, req.DefaultDeliveryAddressID,
+		req.PreferredPickupTimeSlot, req.PreferredDeliveryTimeSlot, req.PreferredPickupDay,
+		defaultServicesJSON, req.AutoScheduleEnabled, req.LeadTimeDays, req.SpecialInstructions)
+
+	if err != nil {
+		http.Error(w, "Failed to save preferences", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Preferences saved successfully"})
 }

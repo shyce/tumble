@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import PageHeader from '@/components/PageHeader'
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { TumbleIconButton } from '@/components/ui/tumble-icon-button'
 import { Calendar, Clock, Save, CheckCircle, Plus, Trash2 } from 'lucide-react'
 
 interface ScheduleSlot {
@@ -131,16 +133,15 @@ export default function DriverSchedulePage() {
                 <Calendar className="w-6 h-6 text-blue-600 mr-3" />
                 <h2 className="text-xl font-bold text-gray-900">Weekly Availability</h2>
               </div>
-              <button
+              <TumbleButton
                 onClick={saveSchedule}
                 disabled={saving}
-                className={`px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center ${
-                  saving ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+                variant="default"
+                size="default"
               >
                 <Save className="w-4 h-4 mr-2" />
                 {saving ? 'Saving...' : 'Save Schedule'}
-              </button>
+              </TumbleButton>
             </div>
           </div>
 
@@ -152,13 +153,14 @@ export default function DriverSchedulePage() {
                   <div key={dayIndex} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">{dayName}</h3>
-                      <button
+                      <TumbleButton
                         onClick={() => addTimeSlot(dayIndex)}
-                        className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium"
+                        variant="ghost"
+                        size="sm"
                       >
                         <Plus className="w-4 h-4 mr-1" />
                         Add Time Slot
-                      </button>
+                      </TumbleButton>
                     </div>
 
                     {daySchedule.length === 0 ? (
@@ -196,12 +198,14 @@ export default function DriverSchedulePage() {
                               />
                             </div>
 
-                            <button
+                            <TumbleIconButton
                               onClick={() => removeTimeSlot(slot.id)}
-                              className="p-1 text-red-500 hover:text-red-700"
+                              variant="destructive"
+                              size="sm"
+                              tooltip="Remove time slot"
                             >
                               <Trash2 className="w-4 h-4" />
-                            </button>
+                            </TumbleIconButton>
                           </div>
                         ))}
                       </div>

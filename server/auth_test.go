@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -464,5 +465,105 @@ func BenchmarkAuthHandler_Login(b *testing.B) {
 
 		w := httptest.NewRecorder()
 		handler.handleLogin(w, req)
+	}
+}
+
+func TestAuthHandler_LoginStatusCheck(t *testing.T) {
+	InitLogger()
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	handler := NewAuthHandler(db.DB)
+
+	// Create test users with different statuses
+	activeUserID := db.CreateTestUserWithPassword(t, "active@example.com", "Active", "User", "password123")
+	inactiveUserID := db.CreateTestUserWithPassword(t, "inactive@example.com", "Inactive", "User", "password123")
+	suspendedUserID := db.CreateTestUserWithPassword(t, "suspended@example.com", "Suspended", "User", "password123")
+
+	// Update user statuses
+	db.Exec("UPDATE users SET status = 'active' WHERE id = $1", activeUserID)
+	db.Exec("UPDATE users SET status = 'inactive' WHERE id = $1", inactiveUserID)
+	db.Exec("UPDATE users SET status = 'suspended' WHERE id = $1", suspendedUserID)
+
+	tests := []struct {
+		name           string
+		requestBody    LoginRequest
+		expectedStatus int
+		expectedMessage string
+	}{
+		{
+			name: "Active user can login",
+			requestBody: LoginRequest{
+				Email:    "active@example.com",
+				Password: "password123",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "Inactive user cannot login",
+			requestBody: LoginRequest{
+				Email:    "inactive@example.com",
+				Password: "password123",
+			},
+			expectedStatus: http.StatusForbidden,
+			expectedMessage: "Your account is currently inactive",
+		},
+		{
+			name: "Suspended user cannot login",
+			requestBody: LoginRequest{
+				Email:    "suspended@example.com",
+				Password: "password123",
+			},
+			expectedStatus: http.StatusForbidden,
+			expectedMessage: "Your account has been suspended",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(tt.requestBody)
+			req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			handler.handleLogin(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d. Response: %s", tt.expectedStatus, w.Code, w.Body.String())
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				var response map[string]interface{}
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Errorf("Failed to unmarshal response: %v", err)
+				}
+
+				// Check for required fields in successful response
+				requiredFields := []string{"user", "token"}
+				for _, field := range requiredFields {
+					if _, exists := response[field]; !exists {
+						t.Errorf("Expected response to have field '%s'", field)
+					}
+				}
+
+				// Verify user status is included in response
+				user, exists := response["user"].(map[string]interface{})
+				if !exists {
+					t.Error("Expected user object in response")
+				} else {
+					status, exists := user["status"]
+					if !exists {
+						t.Error("Expected status field in user object")
+					} else if status != "active" {
+						t.Errorf("Expected user status to be 'active', got %v", status)
+					}
+				}
+			} else if tt.expectedMessage != "" {
+				responseBody := w.Body.String()
+				if !strings.Contains(responseBody, tt.expectedMessage) {
+					t.Errorf("Expected response to contain '%s', got '%s'", tt.expectedMessage, responseBody)
+				}
+			}
+		})
 	}
 }

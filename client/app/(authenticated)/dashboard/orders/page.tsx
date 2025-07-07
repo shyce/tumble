@@ -5,30 +5,14 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Package, Calendar, Clock, CheckCircle, Truck, AlertCircle, Plus } from 'lucide-react'
-import { orderApi, Order } from '@/lib/api'
+import { orderApi, Order, statusConfig, OrderStatus } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
-
-interface OrderStatus {
-  color: string
-  icon: any
-  label: string
-}
-
-const statusConfig: Record<string, OrderStatus> = {
-  scheduled: { color: 'bg-blue-100 text-blue-800', icon: Calendar, label: 'Scheduled' },
-  picked_up: { color: 'bg-orange-100 text-orange-800', icon: Truck, label: 'Picked Up' },
-  processing: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'Processing' },
-  out_for_delivery: { color: 'bg-purple-100 text-purple-800', icon: Truck, label: 'Out for Delivery' },
-  delivered: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Delivered' },
-  cancelled: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Cancelled' }
-}
 
 export default function CustomerOrdersPage() {
   const { data: session, status } = useSession()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -140,11 +124,9 @@ export default function CustomerOrdersPage() {
               const StatusIcon = statusInfo.icon
 
               return (
-                <div
-                  key={order.id}
-                  className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow cursor-pointer"
-                  onClick={() => setSelectedOrder(selectedOrder?.id === order.id ? null : order)}
-                >
+                <Link key={order.id} href={`/dashboard/orders/${order.id}`}>
+                  <div className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-shadow cursor-pointer">
+                
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="text-lg font-semibold text-slate-800 mb-1">
@@ -192,149 +174,13 @@ export default function CustomerOrdersPage() {
                     </div>
                   )}
 
-                  {/* Expanded Order Details */}
-                  {selectedOrder?.id === order.id && (
-                    <div className="mt-6 pt-6 border-t border-slate-100">
-                      <h4 className="text-sm font-semibold text-slate-800 mb-4">Order Details</h4>
-                      
-                      {/* Professional Line Items */}
-                      {order.items && order.items.length > 0 && (
-                        <div className="mb-6">
-                          <h5 className="text-sm font-semibold text-slate-800 mb-3">Order Items</h5>
-                          <div className="border border-slate-200 rounded-lg overflow-hidden">
-                            {order.items.map((item, index) => {
-                              // Format service name properly
-                              const serviceName = item.service_name
-                                ?.replace(/_/g, ' ')
-                                ?.split(' ')
-                                ?.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                                ?.join(' ') || 'Service'
-                              
-                              // Check if this item was actually covered by subscription
-                              const isStandardBag = item.service_name === 'standard_bag'
-                              const isPickupService = item.service_name === 'pickup_service'
-                              // If it's in a subscription order and the price is $0, it was covered
-                              const hasSubscriptionBenefits = order.subscription_id && item.price === 0
-                              
-                              // For subscription-covered items, show original price
-                              let originalPrice = item.price
-                              if (hasSubscriptionBenefits) {
-                                if (isStandardBag) originalPrice = 45
-                                if (isPickupService) originalPrice = 10
-                              }
-                              
-                              const actualPrice = item.price
-                              const lineTotal = actualPrice * item.quantity
-                              const originalLineTotal = originalPrice * item.quantity
-                              
-                              return (
-                                <div key={index} className={`px-4 py-3 ${index > 0 ? 'border-t border-slate-100' : ''}`}>
-                                  <div className="flex justify-between items-start">
-                                    <div className="flex-1">
-                                      <div className="flex items-center space-x-2">
-                                        <span className="font-medium text-slate-900">{serviceName}</span>
-                                        {hasSubscriptionBenefits && (
-                                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full font-medium">
-                                            Covered
-                                          </span>
-                                        )}
-                                      </div>
-                                      
-                                      {hasSubscriptionBenefits ? (
-                                        <div className="text-sm mt-1">
-                                          <div className="text-slate-500 line-through">
-                                            Quantity: {item.quantity} @ ${originalPrice.toFixed(2)} each
-                                          </div>
-                                          <div className="text-emerald-600 font-medium">
-                                            Covered by subscription - $0.00 each
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="text-sm text-slate-600 mt-1">
-                                          Quantity: {item.quantity} @ ${item.price.toFixed(2)} each
-                                        </div>
-                                      )}
-                                      
-                                      {item.notes && (
-                                        <div className="text-xs text-slate-500 mt-1 italic">
-                                          Note: {item.notes}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="text-right ml-4">
-                                      {hasSubscriptionBenefits ? (
-                                        <div>
-                                          <div className="text-sm text-slate-400 line-through">
-                                            ${originalLineTotal.toFixed(2)}
-                                          </div>
-                                          <div className="font-semibold text-emerald-600">
-                                            $0.00
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="font-semibold text-slate-900">
-                                          ${lineTotal.toFixed(2)}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Professional Summary */}
-                      <div className="border border-slate-200 rounded-lg">
-                        <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
-                          <h6 className="text-sm font-semibold text-slate-800">Order Summary</h6>
-                        </div>
-                        <div className="p-4 space-y-2">
-                          {order.subtotal !== undefined && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-600">Subtotal:</span>
-                              <span className="text-slate-900 font-medium">${order.subtotal.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {order.subscription_id && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-emerald-600">Subscription Discount:</span>
-                              <span className="text-emerald-600 font-medium">Applied</span>
-                            </div>
-                          )}
-                          {order.tax !== undefined && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-600">Tax (8%):</span>
-                              <span className="text-slate-900 font-medium">${order.tax.toFixed(2)}</span>
-                            </div>
-                          )}
-                          <div className="border-t border-slate-200 pt-2 mt-3">
-                            <div className="flex justify-between">
-                              <span className="font-semibold text-slate-900">Total:</span>
-                              <span className="font-bold text-slate-900">${order.total?.toFixed(2) || '0.00'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Subscription Info */}
-                      {order.subscription_id && (
-                        <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                          <p className="text-sm text-emerald-700">
-                            💳 This order was placed using your subscription benefits
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   <div className="mt-4 text-center">
-                    <button className="text-sm text-teal-600 hover:text-teal-700 font-medium">
-                      {selectedOrder?.id === order.id ? 'Hide Details' : 'View Details'}
-                    </button>
+                    <span className="text-sm text-teal-600 hover:text-teal-700 font-medium">
+                      Click to view details →
+                    </span>
                   </div>
-                </div>
+                  </div>
+                </Link>
               )
             })}
           </div>

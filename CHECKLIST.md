@@ -82,16 +82,16 @@
 - [x] Driver application form (/apply-driver)
 
 #### Driver Features  
-- [ ] **Driver routes page (/dashboard/routes)** - Route management interface
-- [ ] **Driver earnings page (/dashboard/earnings)** - Earnings tracking and history
+- [x] **Driver routes page (/dashboard/routes)** - Route management interface
+- [x] **Driver earnings page (/dashboard/earnings)** - Earnings tracking and history
 - [x] Driver schedule (/dashboard/schedule) - shared with customer view
 - [x] Driver orders (/dashboard/orders) - show assigned orders
 - [x] Driver settings (/dashboard/settings) - driver-specific settings
 
 #### Admin Features
 - [x] Driver application review (/admin/driver-applications) - existing page
-- [ ] **Users management page (/dashboard/users)** - View, edit, manage all users  
-- [ ] **Admin order management (/dashboard/orders)** - System-wide order oversight
+- [x] **Users management page (/dashboard/users)** - View, edit, manage all users  
+- [x] **Admin order management (/dashboard/orders)** - System-wide order oversight
 - [ ] **Analytics dashboard (/dashboard/analytics)** - System metrics and reporting
 - [ ] **Admin settings page (/dashboard/settings)** - System configuration
 
@@ -109,3 +109,68 @@
 - [ ] Driver earnings and payment system
 - [ ] Advanced analytics dashboard for admins
 - [ ] Mobile-responsive driver interface improvements
+
+## Route Automation (Next Phase)
+### Phase 1: Foundation (1-2 weeks)
+- [ ] **Add Geographic Capabilities**
+  - [ ] Add lat/long columns to addresses table
+  - [ ] Integrate geocoding API (Google Maps/Mapbox)
+  - [ ] Geocode existing addresses
+  - [ ] Add distance calculation utilities
+
+- [ ] **Driver Availability System**
+  - [ ] Create driver_availability table
+  - [ ] Connect existing schedule UI to backend
+  - [ ] Store weekly recurring schedules
+  - [ ] Track driver capacity (max orders/day)
+
+### Phase 2: Basic Automation (2-3 weeks)
+- [ ] **Service Area Management**
+  - [ ] Define service zones/boundaries
+  - [ ] Validate addresses during order creation
+  - [ ] Group orders by geographic proximity
+  - [ ] Create zone-based route suggestions
+
+- [ ] **Automated Route Generation**
+  - [ ] Daily batch job to process pending orders
+  - [ ] Group orders by time slot/proximity/service type
+  - [ ] Generate draft routes for admin review
+  - [ ] Admin interface to review/approve routes
+
+### Phase 3: Smart Assignment (2-3 weeks)
+- [ ] **Driver Matching Algorithm**
+  - [ ] Match drivers based on availability/location/workload
+  - [ ] Performance metrics consideration
+  - [ ] Admin override/adjustment capability
+  - [ ] Driver notification system
+
+- [ ] **Route Optimization**
+  - [ ] Implement traveling salesman algorithm
+  - [ ] Optimize order sequence within routes
+  - [ ] Time estimation for routes
+  - [ ] Map interface for route visualization
+
+### Phase 4: Full Automation (3-4 weeks)
+- [ ] **Auto-Assignment System**
+  - [ ] Configurable automation rules
+  - [ ] Auto-assign routes to drivers
+  - [ ] Driver acceptance/rejection system
+  - [ ] Fallback to manual assignment
+
+- [ ] **Real-time Adjustments**
+  - [ ] Handle same-day order additions
+  - [ ] Dynamic route rebalancing
+  - [ ] Real-time driver location tracking
+  - [ ] Customer notification system
+
+### Quick Wins (Can start immediately)
+- [x] **Subscription Auto-Orders** - Generate recurring orders from subscriptions
+  - [x] Database migration for subscription_preferences table
+  - [x] API endpoints for managing user preferences (GET/POST/PUT)
+  - [x] Comprehensive test suite (6 tests + 2 benchmarks)
+  - [x] User preference storage (addresses, time slots, services, auto-schedule)
+  - [ ] Scheduled task/cron job for recurring order generation
+  - [ ] Frontend UI for subscription preferences
+- [ ] **Bulk Route Creation** - UI to assign multiple orders at once
+- [ ] **Driver Performance Metrics** - Track metrics for better assignment
+- [ ] **Service Area Display** - Show coverage areas on signup

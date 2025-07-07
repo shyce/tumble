@@ -31,11 +31,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
           const data = await response.json()
           
+          // Check user status - backend already handles this, but we include it for session management
+          if (data.user.status !== 'active') {
+            return null // This should not happen as backend rejects inactive users
+          }
+
           return {
             id: data.user.id.toString(),
             email: data.user.email,
             name: `${data.user.first_name} ${data.user.last_name}`,
             role: data.user.role,
+            status: data.user.status,
             first_name: data.user.first_name,
             last_name: data.user.last_name,
             accessToken: data.token,
@@ -51,6 +57,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user) {
         token.accessToken = (user as any).accessToken
         token.role = (user as any).role
+        token.status = (user as any).status
         token.first_name = (user as any).first_name
         token.last_name = (user as any).last_name
       }
@@ -63,6 +70,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         user: {
           ...session.user,
           role: token.role,
+          status: token.status,
           first_name: token.first_name,
           last_name: token.last_name,
         }

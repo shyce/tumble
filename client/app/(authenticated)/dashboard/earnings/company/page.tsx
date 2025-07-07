@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { DollarSign, TrendingUp, Calendar, Package, Users, Download, BarChart3 } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
 import { adminApi } from '@/lib/api'
+import { TumbleButton } from '@/components/ui/tumble-button'
 
 interface CompanyEarningsData {
   todayRevenue: number
@@ -190,13 +191,13 @@ export default function CompanyEarningsPage() {
       
       <div className="mb-8 flex items-center justify-between">
         <div></div>
-        <button
+        <TumbleButton
           onClick={downloadReport}
-          className="flex items-center space-x-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+          variant="default"
         >
           <Download className="w-4 h-4" />
-          <span>Download Report</span>
-        </button>
+          Download Report
+        </TumbleButton>
       </div>
 
       {/* Revenue Summary Cards */}

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import PageHeader from '@/components/PageHeader'
-import { subscriptionApi, driverApi, adminApi, orderApi } from '@/lib/api'
+import { subscriptionApi, driverApi, adminApi, orderApi, statusConfig, OrderStatus } from '@/lib/api'
 import { 
   Sparkles, 
   Calendar, 
@@ -20,7 +20,8 @@ import {
   Users,
   FileText,
   Shield,
-  TrendingUp
+  TrendingUp,
+  AlertCircle
 } from 'lucide-react'
 
 interface CustomerData {
@@ -192,7 +193,10 @@ export default function Dashboard() {
 
           const recentOrderActivity = recentOrders.slice(0, 3).map(order => ({
             type: 'order_update',
-            description: `Order ${order.id} - ${order.status}`,
+            description: `Order ${order.id}`,
+            status: order.status,
+            orderId: order.id,
+            customerName: order.user_name,
             timestamp: order.updated_at || order.created_at
           }))
 
@@ -935,45 +939,33 @@ export default function Dashboard() {
                     <div className="space-y-3">
                       {(user.role === 'customer' || !user.role) ? (
                         customerData?.recentOrders?.length ? (
-                          customerData.recentOrders.map((order, index) => (
-                            <div key={order.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                              <div className="flex items-center space-x-3">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                  order.status === 'completed' ? 'bg-emerald-100' :
-                                  order.status === 'in_progress' ? 'bg-blue-100' :
-                                  order.status === 'scheduled' ? 'bg-yellow-100' :
-                                  'bg-slate-100'
-                                }`}>
-                                  {order.status === 'completed' ? (
-                                    <CheckCircle className="w-5 h-5 text-emerald-600" />
-                                  ) : order.status === 'in_progress' ? (
-                                    <Clock className="w-5 h-5 text-blue-600" />
-                                  ) : (
-                                    <Package className="w-5 h-5 text-yellow-600" />
-                                  )}
+                          customerData.recentOrders.map((order, index) => {
+                            const statusInfo = statusConfig[order.status] || statusConfig.pending
+                            const StatusIcon = statusInfo.icon
+                            
+                            return (
+                              <Link key={order.id} href={`/dashboard/orders/${order.id}`}>
+                                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                  <div className="flex items-center space-x-3">
+                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${statusInfo.color.replace('text-', 'bg-').replace('-800', '-100').replace('-700', '-100')}`}>
+                                      <StatusIcon className={`w-5 h-5 ${statusInfo.color.replace('bg-', 'text-').replace('-100', '-600')}`} />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">
+                                        Order #{order.id}
+                                      </p>
+                                      <p className="text-xs text-slate-500">
+                                        {new Date(order.created_at).toLocaleDateString()} • ${order.total?.toFixed(2) || '0.00'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${statusInfo.color}`}>
+                                    {statusInfo.label}
+                                  </span>
                                 </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    Order #{order.id}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {new Date(order.created_at).toLocaleDateString()} • ${order.total || '0.00'}
-                                  </p>
-                                </div>
-                              </div>
-                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                                order.status === 'completed' ? 'bg-emerald-500 text-white' :
-                                order.status === 'in_progress' ? 'bg-blue-500 text-white' :
-                                order.status === 'scheduled' ? 'bg-yellow-500 text-white' :
-                                'bg-slate-500 text-white'
-                              }`}>
-                                {order.status === 'completed' ? 'Done' :
-                                 order.status === 'in_progress' ? 'Active' :
-                                 order.status === 'scheduled' ? 'Scheduled' :
-                                 order.status}
-                              </span>
-                            </div>
-                          ))
+                              </Link>
+                            )
+                          })
                         ) : (
                           <div className="text-center py-6">
                             <div className="w-12 h-12 bg-gradient-to-br from-teal-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -989,45 +981,33 @@ export default function Dashboard() {
                           {customerData?.recentOrders?.length ? (
                             <>
                               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">My Orders</div>
-                              {customerData.recentOrders.slice(0, 2).map((order, index) => (
-                                <div key={`order-${order.id}`} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                                  <div className="flex items-center space-x-3">
-                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                      order.status === 'completed' ? 'bg-emerald-100' :
-                                      order.status === 'in_progress' ? 'bg-blue-100' :
-                                      order.status === 'scheduled' ? 'bg-yellow-100' :
-                                      'bg-slate-100'
-                                    }`}>
-                                      {order.status === 'completed' ? (
-                                        <CheckCircle className="w-5 h-5 text-emerald-600" />
-                                      ) : order.status === 'in_progress' ? (
-                                        <Clock className="w-5 h-5 text-blue-600" />
-                                      ) : (
-                                        <Package className="w-5 h-5 text-yellow-600" />
-                                      )}
+                              {customerData.recentOrders.slice(0, 2).map((order, index) => {
+                                const statusInfo = statusConfig[order.status] || statusConfig.pending
+                                const StatusIcon = statusInfo.icon
+                                
+                                return (
+                                  <Link key={`order-${order.id}`} href={`/dashboard/orders/${order.id}`}>
+                                    <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                      <div className="flex items-center space-x-3">
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${statusInfo.color.replace('text-', 'bg-').replace('-800', '-100').replace('-700', '-100')}`}>
+                                          <StatusIcon className={`w-5 h-5 ${statusInfo.color.replace('bg-', 'text-').replace('-100', '-600')}`} />
+                                        </div>
+                                        <div>
+                                          <p className="text-sm font-semibold text-slate-900">
+                                            Order #{order.id}
+                                          </p>
+                                          <p className="text-xs text-slate-500">
+                                            {new Date(order.created_at).toLocaleDateString()} • ${order.total?.toFixed(2) || '0.00'}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <span className={`px-2 py-1 rounded-md text-xs font-medium ${statusInfo.color}`}>
+                                        {statusInfo.label}
+                                      </span>
                                     </div>
-                                    <div>
-                                      <p className="text-sm font-semibold text-slate-900">
-                                        Order #{order.id}
-                                      </p>
-                                      <p className="text-xs text-slate-500">
-                                        {new Date(order.created_at).toLocaleDateString()} • ${order.total || '0.00'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                                    order.status === 'completed' ? 'bg-emerald-500 text-white' :
-                                    order.status === 'in_progress' ? 'bg-blue-500 text-white' :
-                                    order.status === 'scheduled' ? 'bg-yellow-500 text-white' :
-                                    'bg-slate-500 text-white'
-                                  }`}>
-                                    {order.status === 'completed' ? 'Done' :
-                                     order.status === 'in_progress' ? 'Active' :
-                                     order.status === 'scheduled' ? 'Scheduled' :
-                                     order.status}
-                                  </span>
-                                </div>
-                              ))}
+                                  </Link>
+                                )
+                              })}
                             </>
                           ) : null}
 
@@ -1090,34 +1070,74 @@ export default function Dashboard() {
                         </div>
                       ) : (
                         adminData?.recentActivity?.length ? (
-                          adminData.recentActivity.map((activity, index) => (
-                            <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                              <div className="flex items-center space-x-3">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                  activity.type === 'user_registration' ? 'bg-purple-100' : 'bg-indigo-100'
-                                }`}>
-                                  {activity.type === 'user_registration' ? (
-                                    <Users className="w-5 h-5 text-purple-600" />
-                                  ) : (
-                                    <Package className="w-5 h-5 text-indigo-600" />
-                                  )}
-                                </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    {activity.type === 'user_registration' ? 'New User' : 'Order Update'}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {new Date(activity.timestamp).toLocaleDateString()}
-                                  </p>
-                                </div>
-                              </div>
-                              <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                                activity.type === 'user_registration' ? 'bg-purple-500 text-white' : 'bg-indigo-500 text-white'
-                              }`}>
-                                {activity.type === 'user_registration' ? 'New' : 'Updated'}
-                              </span>
-                            </div>
-                          ))
+                          adminData.recentActivity.map((activity, index) => {
+                            const isOrderActivity = activity.type === 'order_update'
+                            
+                            if (isOrderActivity && activity.orderId) {
+                              const statusInfo = statusConfig[activity.status as OrderStatus] || statusConfig.pending
+                              const StatusIcon = statusInfo.icon
+                              
+                              return (
+                                <Link key={index} href={`/dashboard/orders/${activity.orderId}`}>
+                                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                    <div className="flex items-center space-x-3">
+                                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${statusInfo.color.replace('text-', 'bg-').replace('-800', '-100').replace('-700', '-100')}`}>
+                                        <StatusIcon className={`w-5 h-5 ${statusInfo.color.replace('bg-', 'text-').replace('-100', '-600')}`} />
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-900">
+                                          Order #{activity.orderId}
+                                        </p>
+                                        <p className="text-xs text-slate-500">
+                                          {activity.customerName} • {new Date(activity.timestamp).toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${statusInfo.color}`}>
+                                      {statusInfo.label}
+                                    </span>
+                                  </div>
+                                </Link>
+                              )
+                            } else {
+                              // Extract user role and email from description
+                              const userRoleMatch = activity.description.match(/New (\w+) registered: (.+)/)
+                              const userRole = userRoleMatch ? userRoleMatch[1] : 'user'
+                              const userEmail = userRoleMatch ? userRoleMatch[2] : ''
+                              
+                              return (
+                                <Link key={index} href={`/dashboard/users?filter=${userRole}&highlight=${encodeURIComponent(userEmail)}`}>
+                                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                    <div className="flex items-center space-x-3">
+                                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                                        userRole === 'driver' ? 'bg-blue-100' : 
+                                        userRole === 'admin' ? 'bg-purple-100' : 'bg-emerald-100'
+                                      }`}>
+                                        <Users className={`w-5 h-5 ${
+                                          userRole === 'driver' ? 'text-blue-600' : 
+                                          userRole === 'admin' ? 'text-purple-600' : 'text-emerald-600'
+                                        }`} />
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-900 capitalize">
+                                          New {userRole}
+                                        </p>
+                                        <p className="text-xs text-slate-500">
+                                          {userEmail} • {new Date(activity.timestamp).toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                      userRole === 'driver' ? 'bg-blue-500 text-white' : 
+                                      userRole === 'admin' ? 'bg-purple-500 text-white' : 'bg-emerald-500 text-white'
+                                    }`}>
+                                      View
+                                    </span>
+                                  </div>
+                                </Link>
+                              )
+                            }
+                          })
                         ) : (
                           <div className="text-center py-6">
                             <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">

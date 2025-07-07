@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import PageHeader from '@/components/PageHeader';
+import { TumbleButton } from '@/components/ui/tumble-button';
+import { TumbleIconButton } from '@/components/ui/tumble-icon-button';
 
 interface DriverApplication {
   id: number;
@@ -199,22 +201,26 @@ export default function DriverApplicationsPage() {
                   {new Date(app.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  <button
+                  <TumbleButton
                     onClick={() => setSelectedApp(app)}
+                    variant="ghost"
+                    size="sm"
                     className="text-blue-600 hover:text-blue-900 mr-4"
                   >
                     View Details
-                  </button>
+                  </TumbleButton>
                   {app.status === 'pending' && (
-                    <button
+                    <TumbleButton
                       onClick={() => {
                         setSelectedApp(app);
                         setReviewModal(true);
                       }}
+                      variant="ghost"
+                      size="sm"
                       className="text-green-600 hover:text-green-900"
                     >
                       Review
-                    </button>
+                    </TumbleButton>
                   )}
                 </td>
               </tr>
@@ -232,12 +238,14 @@ export default function DriverApplicationsPage() {
                 <h3 className="text-lg font-medium text-gray-900">
                   Application Details - {selectedApp.application_data.first_name} {selectedApp.application_data.last_name}
                 </h3>
-                <button
+                <TumbleIconButton
                   onClick={() => setSelectedApp(null)}
+                  variant="ghost"
+                  size="sm"
                   className="text-gray-400 hover:text-gray-600"
                 >
                   ✕
-                </button>
+                </TumbleIconButton>
               </div>
 
               <div className="space-y-4">
@@ -302,12 +310,12 @@ export default function DriverApplicationsPage() {
               </div>
 
               <div className="flex justify-end mt-6">
-                <button
+                <TumbleButton
                   onClick={() => setSelectedApp(null)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                  variant="secondary"
                 >
                   Close
-                </button>
+                </TumbleButton>
               </div>
             </div>
           </div>
@@ -323,12 +331,14 @@ export default function DriverApplicationsPage() {
                 <h3 className="text-lg font-medium text-gray-900">
                   Review Application - {selectedApp.application_data.first_name} {selectedApp.application_data.last_name}
                 </h3>
-                <button
+                <TumbleIconButton
                   onClick={() => setReviewModal(false)}
+                  variant="ghost"
+                  size="sm"
                   className="text-gray-400 hover:text-gray-600"
                 >
                   ✕
-                </button>
+                </TumbleIconButton>
               </div>
 
               <div className="space-y-4">
@@ -358,19 +368,19 @@ export default function DriverApplicationsPage() {
               </div>
 
               <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-4 mt-6">
-                <button
+                <TumbleButton
                   onClick={() => setReviewModal(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                  variant="secondary"
                 >
                   Cancel
-                </button>
-                <button
+                </TumbleButton>
+                <TumbleButton
                   onClick={handleReview}
                   disabled={!reviewData.status || submitting}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  variant="default"
                 >
                   {submitting ? 'Submitting...' : 'Submit Review'}
-                </button>
+                </TumbleButton>
               </div>
             </div>
           </div>

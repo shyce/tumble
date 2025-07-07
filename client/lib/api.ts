@@ -1,6 +1,32 @@
 import { authFetchWithSession } from './auth-fetch'
+import { 
+  Calendar, 
+  Clock, 
+  CheckCircle, 
+  Truck, 
+  AlertCircle,
+  Package
+} from 'lucide-react'
 
 const API_BASE_URL = '' // Use relative paths since we're behind nginx
+
+// Shared order status configuration
+export interface OrderStatus {
+  color: string
+  icon: any
+  label: string
+}
+
+export const statusConfig: Record<string, OrderStatus> = {
+  pending: { color: 'bg-gray-100 text-gray-800', icon: Clock, label: 'Pending' },
+  scheduled: { color: 'bg-blue-100 text-blue-800', icon: Calendar, label: 'Scheduled' },
+  picked_up: { color: 'bg-orange-100 text-orange-800', icon: Truck, label: 'Picked Up' },
+  in_process: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'In Process' },
+  ready: { color: 'bg-purple-100 text-purple-800', icon: CheckCircle, label: 'Ready' },
+  out_for_delivery: { color: 'bg-indigo-100 text-indigo-800', icon: Truck, label: 'Out for Delivery' },
+  delivered: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Delivered' },
+  cancelled: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Cancelled' }
+}
 
 export interface User {
   id: number
@@ -50,6 +76,42 @@ export interface CreateSubscriptionRequest {
 export interface UpdateSubscriptionRequest {
   status?: string // active, paused, cancelled
   plan_id?: number
+}
+
+// Service request for subscription preferences
+export interface ServiceRequest {
+  service_id: number
+  quantity: number
+}
+
+// Subscription preferences for auto-scheduling
+export interface SubscriptionPreferences {
+  id: number
+  user_id: number
+  default_pickup_address_id?: number
+  default_delivery_address_id?: number
+  preferred_pickup_time_slot: string
+  preferred_delivery_time_slot: string
+  preferred_pickup_day: string
+  default_services: ServiceRequest[]
+  auto_schedule_enabled: boolean
+  lead_time_days: number
+  special_instructions: string
+  created_at: string
+  updated_at: string
+}
+
+// Request body for creating/updating subscription preferences
+export interface CreateSubscriptionPreferencesRequest {
+  default_pickup_address_id?: number
+  default_delivery_address_id?: number
+  preferred_pickup_time_slot: string
+  preferred_delivery_time_slot: string
+  preferred_pickup_day: string
+  default_services: ServiceRequest[]
+  auto_schedule_enabled: boolean
+  lead_time_days: number
+  special_instructions: string
 }
 
 export interface Subscription {
@@ -304,6 +366,34 @@ export const subscriptionApi = {
     }
 
     return response.json()
+  },
+
+  async getSubscriptionPreferences(session: any): Promise<SubscriptionPreferences | null> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/preferences`)
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null // No preferences found, will return defaults
+      }
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async createOrUpdateSubscriptionPreferences(session: any, request: CreateSubscriptionPreferencesRequest): Promise<{ message: string }> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/preferences`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
   }
 }
 
@@ -524,6 +614,49 @@ export interface RouteAssignmentRequest {
   route_type: 'pickup' | 'delivery'
 }
 
+export interface BulkStatusUpdateRequest {
+  order_ids: number[]
+  status: string
+  notes?: string
+}
+
+export interface BulkStatusUpdateResponse {
+  message: string
+  updated_count: number
+  total_orders: number
+}
+
+export interface OptimizationSuggestionsRequest {
+  order_ids: number[]
+}
+
+export interface OrderLocation {
+  id: number
+  pickup_date: string
+  pickup_time_slot: string
+  delivery_date: string
+  delivery_time_slot: string
+  pickup_address: string
+  pickup_city: string
+  pickup_zip: string
+  delivery_address: string
+  delivery_city: string
+  delivery_zip: string
+  customer_name: string
+}
+
+export interface OptimizationSuggestion {
+  type: string
+  message: string
+  groups: { [key: string]: number[] }
+}
+
+export interface OptimizationSuggestionsResponse {
+  orders: OrderLocation[]
+  suggestions: OptimizationSuggestion[]
+  total_orders: number
+}
+
 export interface DriverStats {
   driver_id: number
   driver_name: string
@@ -628,12 +761,81 @@ export const adminApi = {
     return response.json()
   },
 
+  async createUser(session: any, userData: { first_name: string, last_name: string, email: string, phone?: string, role: string, status: string }): Promise<User> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users`, {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async updateUser(session: any, userId: number, userData: { first_name: string, last_name: string, email: string, phone?: string, role: string, status: string }): Promise<User> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async deleteUser(session: any, userId: number): Promise<{ message: string }> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/users/${userId}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
   async getRevenueAnalytics(session: any, period?: 'day' | 'week' | 'month'): Promise<RevenueAnalytics[]> {
     const searchParams = new URLSearchParams()
     if (period) searchParams.append('period', period)
 
     const url = `${API_BASE_URL}/api/v1/admin/analytics/revenue${searchParams.toString() ? '?' + searchParams.toString() : ''}`
     const response = await authFetchWithSession(session, url)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async bulkUpdateOrderStatus(session: any, request: BulkStatusUpdateRequest): Promise<BulkStatusUpdateResponse> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/bulk-status`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getOptimizationSuggestions(session: any, request: OptimizationSuggestionsRequest): Promise<OptimizationSuggestionsResponse> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/routes/optimization-suggestions`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
 
     if (!response.ok) {
       const errorText = await response.text()

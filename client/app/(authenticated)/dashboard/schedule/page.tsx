@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Calendar, MapPin, Package, Plus, Minus, Crown, Loader2 } from 'lucide-react'
 import { addressApi, serviceApi, orderApi, subscriptionApi, Address, Service, OrderItem, SubscriptionUsage, CostCalculation } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
+import { TumbleButton } from '@/components/ui/tumble-button'
 
 
 export default function SchedulePage() {
@@ -451,21 +452,23 @@ export default function SchedulePage() {
                   </select>
 
                   <div className="flex items-center space-x-2">
-                    <button
+                    <TumbleButton
                       type="button"
                       onClick={() => updateOrderItem(index, { quantity: Math.max(1, item.quantity - 1) })}
-                      className="p-1 text-slate-500 hover:text-slate-700"
+                      variant="ghost"
+                      size="icon"
                     >
                       <Minus className="w-4 h-4" />
-                    </button>
+                    </TumbleButton>
                     <span className="w-8 text-center">{item.quantity}</span>
-                    <button
+                    <TumbleButton
                       type="button"
                       onClick={() => updateOrderItem(index, { quantity: item.quantity + 1 })}
-                      className="p-1 text-slate-500 hover:text-slate-700"
+                      variant="ghost"
+                      size="icon"
                     >
                       <Plus className="w-4 h-4" />
-                    </button>
+                    </TumbleButton>
                   </div>
 
                   <span className="font-semibold text-slate-900 w-20 text-right">
@@ -473,24 +476,26 @@ export default function SchedulePage() {
                   </span>
 
                   {orderItems.length > 1 && (
-                    <button
+                    <TumbleButton
                       type="button"
                       onClick={() => removeOrderItem(index)}
-                      className="text-red-500 hover:text-red-700"
+                      variant="destructive"
+                      size="icon"
                     >
                       ✕
-                    </button>
+                    </TumbleButton>
                   )}
                 </div>
               ))}
 
-              <button
+              <TumbleButton
                 type="button"
                 onClick={addOrderItem}
-                className="w-full p-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-teal-500 hover:text-teal-600 transition-colors"
+                variant="outline"
+                className="w-full p-3 border-2 border-dashed"
               >
                 + Add Another Service
-              </button>
+              </TumbleButton>
 
               <div className="bg-slate-50 rounded-lg p-4">
                 <div className="space-y-2">
@@ -576,22 +581,19 @@ export default function SchedulePage() {
                     {[15, 18, 20, 25].map((percentage) => {
                       const tipAmount = (costCalculation.final_subtotal * percentage) / 100
                       return (
-                        <button
+                        <TumbleButton
                           key={percentage}
                           type="button"
                           onClick={() => {
                             setTip(tipAmount)
                             setCustomTip('')
                           }}
-                          className={`p-3 rounded-lg border-2 font-medium transition-all ${
-                            Math.abs(tip - tipAmount) < 0.01
-                              ? 'border-teal-500 bg-teal-50 text-teal-700'
-                              : 'border-slate-200 hover:border-teal-300 text-slate-700'
-                          }`}
+                          variant={Math.abs(tip - tipAmount) < 0.01 ? "default" : "outline"}
+                          className="p-3 font-medium flex flex-col"
                         >
                           <div className="text-sm">{percentage}%</div>
-                          <div className="text-xs text-slate-500">${tipAmount.toFixed(2)}</div>
-                        </button>
+                          <div className="text-xs opacity-75">${tipAmount.toFixed(2)}</div>
+                        </TumbleButton>
                       )
                     })}
                   </div>
@@ -614,16 +616,17 @@ export default function SchedulePage() {
                         className="w-24 p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-slate-900 bg-white"
                       />
                     </div>
-                    <button
+                    <TumbleButton
                       type="button"
                       onClick={() => {
                         setTip(0)
                         setCustomTip('')
                       }}
-                      className="px-3 py-1 text-sm text-slate-500 hover:text-slate-700"
+                      variant="ghost"
+                      size="sm"
                     >
                       No Tip
-                    </button>
+                    </TumbleButton>
                   </div>
                 </>
               ) : (
@@ -652,16 +655,17 @@ export default function SchedulePage() {
                         className="w-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-slate-900 bg-white"
                       />
                     </div>
-                    <button
+                    <TumbleButton
                       type="button"
                       onClick={() => {
                         setTip(0)
                         setCustomTip('')
                       }}
-                      className="px-3 py-2 text-sm text-slate-500 hover:text-slate-700"
+                      variant="ghost"
+                      size="sm"
                     >
                       No Tip
-                    </button>
+                    </TumbleButton>
                   </div>
                 </>
               )}
@@ -682,10 +686,12 @@ export default function SchedulePage() {
 
           {/* Submit Button */}
           <div className="text-center">
-            <button
+            <TumbleButton
               type="submit"
               disabled={submitting || addresses.length === 0}
-              className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              variant="default"
+              size="lg"
+              className="px-8 py-4 text-lg"
             >
               <div className="flex items-center justify-center">
                 {submitting && (
@@ -693,7 +699,7 @@ export default function SchedulePage() {
                 )}
                 {submitting ? 'Scheduling...' : 'Schedule Pickup'}
               </div>
-            </button>
+            </TumbleButton>
           </div>
         </form>
       </div>

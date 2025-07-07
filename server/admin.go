@@ -9,7 +9,25 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// OrderLocation represents an order with its pickup and delivery location details
+type OrderLocation struct {
+	ID              int    `json:"id"`
+	PickupDate      string `json:"pickup_date"`
+	PickupTimeSlot  string `json:"pickup_time_slot"`
+	DeliveryDate    string `json:"delivery_date"`
+	DeliveryTimeSlot string `json:"delivery_time_slot"`
+	PickupAddress   string `json:"pickup_address"`
+	PickupCity      string `json:"pickup_city"`
+	PickupZip       string `json:"pickup_zip"`
+	DeliveryAddress string `json:"delivery_address"`
+	DeliveryCity    string `json:"delivery_city"`
+	DeliveryZip     string `json:"delivery_zip"`
+	CustomerName    string `json:"customer_name"`
+}
 
 type AdminHandler struct {
 	db        *sql.DB
@@ -23,6 +41,12 @@ func NewAdminHandler(db *sql.DB, realtime RealtimeInterface) *AdminHandler {
 		realtime:  realtime,
 		getUserID: getUserIDFromRequest,
 	}
+}
+
+// hashPassword hashes a password using bcrypt
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
 }
 
 // Middleware to check if user is admin
@@ -53,6 +77,7 @@ type AdminUserResponse struct {
 	LastName           string    `json:"last_name"`
 	Phone              *string   `json:"phone,omitempty"`
 	Role               string    `json:"role"`
+	Status             string    `json:"status"`
 	EmailVerified      bool      `json:"email_verified"`
 	CreatedAt          time.Time `json:"created_at"`
 	TotalOrders        int       `json:"total_orders"`
@@ -85,7 +110,7 @@ func (h *AdminHandler) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT 
-			u.id, u.email, u.first_name, u.last_name, u.phone, u.role, 
+			u.id, u.email, u.first_name, u.last_name, u.phone, u.role, u.status,
 			u.email_verified_at IS NOT NULL as email_verified, u.created_at,
 			COUNT(DISTINCT o.id) as total_orders,
 			EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active') as has_subscription
@@ -130,7 +155,7 @@ func (h *AdminHandler) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var u AdminUserResponse
 		err := rows.Scan(
-			&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.Phone, &u.Role,
+			&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.Phone, &u.Role, &u.Status,
 			&u.EmailVerified, &u.CreatedAt, &u.TotalOrders, &u.ActiveSubscription,
 		)
 		if err != nil {
@@ -187,6 +212,422 @@ func (h *AdminHandler) handleUpdateUserRole(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Role updated successfully"})
+}
+
+// handleCreateUser creates a new user
+func (h *AdminHandler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get current user ID for logging
+	currentUserID, err := h.getUserID(r, h.db)
+	if err != nil {
+		currentUserID = 0 // Will be handled by requireAdmin middleware
+	}
+	logger := LogRequest("create_user", r.Method, r.URL.Path, currentUserID)
+
+	var req struct {
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Phone     string `json:"phone"`
+		Role      string `json:"role"`
+		Status    string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("Failed to decode request body", "error", err)
+		http.Error(w, "Invalid request body format", http.StatusBadRequest)
+		return
+	}
+
+	logger.Info("Creating new user", "email", req.Email, "role", req.Role)
+
+	// Validate required fields
+	if req.FirstName == "" || req.LastName == "" || req.Email == "" {
+		logger.Warn("Missing required fields", "first_name", req.FirstName, "last_name", req.LastName, "email", req.Email)
+		http.Error(w, "First name, last name, and email are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate role
+	if req.Role != "customer" && req.Role != "driver" && req.Role != "admin" {
+		logger.Warn("Invalid role provided", "role", req.Role)
+		http.Error(w, "Role must be customer, driver, or admin", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status
+	if req.Status != "active" && req.Status != "inactive" && req.Status != "suspended" {
+		logger.Warn("Invalid status provided", "status", req.Status)
+		http.Error(w, "Status must be active, inactive, or suspended", http.StatusBadRequest)
+		return
+	}
+
+	// Check if email already exists
+	var existingUserID int
+	err = h.db.QueryRow("SELECT id FROM users WHERE email = $1", req.Email).Scan(&existingUserID)
+	if err == nil {
+		logger.Warn("Attempt to create user with existing email", "email", req.Email, "existing_user_id", existingUserID)
+		http.Error(w, "A user with this email address already exists", http.StatusConflict)
+		return
+	} else if err != sql.ErrNoRows {
+		logger.Error("Database error checking existing email", "error", err, "email", req.Email)
+		http.Error(w, "Database error while checking email", http.StatusInternalServerError)
+		return
+	}
+
+	// Create user with a temporary password (user will need to reset)
+	tempPassword := "temp123!" // In production, generate a secure temporary password
+	hashedPassword, err := hashPassword(tempPassword)
+	if err != nil {
+		logger.Error("Failed to hash password", "error", err)
+		http.Error(w, "Failed to process password", http.StatusInternalServerError)
+		return
+	}
+
+	var userID int
+	err = h.db.QueryRow(`
+		INSERT INTO users (email, password_hash, first_name, last_name, phone, role, status, email_verified_at, created_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id
+	`, req.Email, hashedPassword, req.FirstName, req.LastName, req.Phone, req.Role, req.Status).Scan(&userID)
+
+	if err != nil {
+		logger.Error("Failed to insert user into database", "error", err, "email", req.Email, "role", req.Role)
+		http.Error(w, "Failed to create user account", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Successfully created user", "user_id", userID, "email", req.Email, "role", req.Role)
+
+	// Return the created user
+	var phone *string
+	if req.Phone != "" {
+		phone = &req.Phone
+	}
+
+	user := AdminUserResponse{
+		ID:            userID,
+		Email:         req.Email,
+		FirstName:     req.FirstName,
+		LastName:      req.LastName,
+		Phone:         phone,
+		Role:          req.Role,
+		Status:        req.Status,
+		EmailVerified: true,
+		CreatedAt:     time.Now(),
+		TotalOrders:   0,
+		ActiveSubscription: false,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		logger.Error("Failed to encode response", "error", err, "user_id", userID)
+	}
+}
+
+// handleUpdateUser updates a user's details
+func (h *AdminHandler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract user ID from URL path
+	vars := mux.Vars(r)
+	userIDStr := vars["id"]
+	if userIDStr == "" {
+		http.Error(w, "User ID required", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Phone     string `json:"phone"`
+		Role      string `json:"role"`
+		Status    string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.FirstName == "" || req.LastName == "" || req.Email == "" {
+		http.Error(w, "First name, last name, and email are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate role
+	if req.Role != "customer" && req.Role != "driver" && req.Role != "admin" {
+		http.Error(w, "Invalid role", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status
+	if req.Status != "active" && req.Status != "inactive" && req.Status != "suspended" {
+		http.Error(w, "Invalid status", http.StatusBadRequest)
+		return
+	}
+
+	// Check if email already exists for another user
+	var existingUserID int
+	err = h.db.QueryRow("SELECT id FROM users WHERE email = $1 AND id != $2", req.Email, userID).Scan(&existingUserID)
+	if err == nil {
+		http.Error(w, "A user with this email address already exists", http.StatusConflict)
+		return
+	} else if err != sql.ErrNoRows {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Update user
+	_, err = h.db.Exec(`
+		UPDATE users 
+		SET email = $1, first_name = $2, last_name = $3, phone = $4, role = $5, status = $6, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $7
+	`, req.Email, req.FirstName, req.LastName, req.Phone, req.Role, req.Status, userID)
+
+	if err != nil {
+		http.Error(w, "Failed to update user", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the updated user
+	var user AdminUserResponse
+	err = h.db.QueryRow(`
+		SELECT 
+			u.id, u.email, u.first_name, u.last_name, u.phone, u.role, u.status,
+			u.email_verified_at IS NOT NULL as email_verified, u.created_at,
+			COUNT(DISTINCT o.id) as total_orders,
+			EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active') as has_subscription
+		FROM users u
+		LEFT JOIN orders o ON u.id = o.user_id
+		WHERE u.id = $1
+		GROUP BY u.id
+	`, userID).Scan(
+		&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Phone, &user.Role, &user.Status,
+		&user.EmailVerified, &user.CreatedAt, &user.TotalOrders, &user.ActiveSubscription,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch updated user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// handleUpdateUserStatus updates a user's status
+func (h *AdminHandler) handleUpdateUserStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get current user ID for logging
+	currentUserID, err := h.getUserID(r, h.db)
+	if err != nil {
+		currentUserID = 0
+	}
+
+	// Extract user ID from URL path
+	vars := mux.Vars(r)
+	userIDStr := vars["id"]
+	if userIDStr == "" {
+		http.Error(w, "User ID required", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	logger := LogRequest("update_user_status", r.Method, r.URL.Path, currentUserID)
+
+	var req struct {
+		Status string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("Failed to decode request body", "error", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status
+	if req.Status != "active" && req.Status != "inactive" && req.Status != "suspended" {
+		logger.Warn("Invalid status provided", "status", req.Status, "target_user_id", userID)
+		http.Error(w, "Status must be active, inactive, or suspended", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent changing your own status
+	if currentUserID == userID {
+		logger.Warn("Attempt to change own status", "user_id", currentUserID, "status", req.Status)
+		http.Error(w, "You cannot change your own account status", http.StatusForbidden)
+		return
+	}
+
+	logger.Info("Updating user status", "target_user_id", userID, "new_status", req.Status)
+
+	// Update user status
+	_, err = h.db.Exec("UPDATE users SET status = $1 WHERE id = $2", req.Status, userID)
+	if err != nil {
+		logger.Error("Failed to update user status", "error", err, "target_user_id", userID, "status", req.Status)
+		http.Error(w, "Failed to update user status", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Successfully updated user status", "target_user_id", userID, "new_status", req.Status)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "User status updated successfully",
+		"status":  req.Status,
+	})
+}
+
+// handleDeleteUser deletes a user
+func (h *AdminHandler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract user ID from URL path
+	vars := mux.Vars(r)
+	userIDStr := vars["id"]
+	if userIDStr == "" {
+		http.Error(w, "User ID required", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get current user ID to prevent self-deletion
+	currentUserID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Prevent deleting the currently logged-in user
+	if userID == currentUserID {
+		http.Error(w, "You cannot delete your own account while logged in", http.StatusForbidden)
+		return
+	}
+
+	// Check if user exists and get their role
+	var userRole string
+	err = h.db.QueryRow("SELECT role FROM users WHERE id = $1", userID).Scan(&userRole)
+	if err == sql.ErrNoRows {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Prevent deleting admin users for safety
+	if userRole == "admin" {
+		http.Error(w, "Admin users cannot be deleted for security reasons", http.StatusForbidden)
+		return
+	}
+
+	// Check if user has active orders
+	var activeOrdersCount int
+	err = h.db.QueryRow(`
+		SELECT COUNT(*) FROM orders 
+		WHERE user_id = $1 AND status NOT IN ('delivered', 'cancelled')
+	`, userID).Scan(&activeOrdersCount)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if activeOrdersCount > 0 {
+		http.Error(w, "This user has active orders and cannot be deleted. Please complete or cancel their orders first", http.StatusConflict)
+		return
+	}
+
+	// Begin transaction for safe deletion
+	tx, err := h.db.Begin()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete related records first (to maintain referential integrity)
+	// Delete subscription preferences
+	_, err = tx.Exec("DELETE FROM subscription_preferences WHERE user_id = $1", userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user data", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete subscriptions
+	_, err = tx.Exec("DELETE FROM subscriptions WHERE user_id = $1", userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user data", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete addresses
+	_, err = tx.Exec("DELETE FROM addresses WHERE user_id = $1", userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user data", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete completed orders (keep historical data integrity)
+	_, err = tx.Exec("DELETE FROM orders WHERE user_id = $1 AND status IN ('delivered', 'cancelled')", userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user data", http.StatusInternalServerError)
+		return
+	}
+
+	// Finally delete the user
+	result, err := tx.Exec("DELETE FROM users WHERE id = $1", userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete deletion", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "User deleted successfully"})
 }
 
 // Order Management
@@ -556,4 +997,265 @@ func (h *AdminHandler) handleAssignDriverToRoute(w http.ResponseWriter, r *http.
 		"message":  "Route created successfully",
 		"route_id": routeID,
 	})
+}
+
+// handleBulkOrderStatusUpdate updates the status of multiple orders at once
+func (h *AdminHandler) handleBulkOrderStatusUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		OrderIDs []int  `json:"order_ids"`
+		Status   string `json:"status"`
+		Notes    string `json:"notes,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status
+	validStatuses := []string{"pending", "scheduled", "picked_up", "in_process", "ready", "out_for_delivery", "delivered", "cancelled"}
+	isValidStatus := false
+	for _, status := range validStatuses {
+		if req.Status == status {
+			isValidStatus = true
+			break
+		}
+	}
+	if !isValidStatus {
+		http.Error(w, "Invalid status", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.OrderIDs) == 0 {
+		http.Error(w, "No orders specified", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID for audit trail
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Begin transaction
+	tx, err := h.db.Begin()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	updatedCount := 0
+	// Update each order
+	for _, orderID := range req.OrderIDs {
+		// Update order status
+		result, err := tx.Exec(`
+			UPDATE orders 
+			SET status = $1, updated_at = CURRENT_TIMESTAMP 
+			WHERE id = $2
+		`, req.Status, orderID)
+
+		if err != nil {
+			continue // Skip failed updates but don't fail the whole operation
+		}
+
+		if affected, _ := result.RowsAffected(); affected > 0 {
+			updatedCount++
+
+			// Add status history entry
+			notes := req.Notes
+			if notes == "" {
+				notes = fmt.Sprintf("Bulk status update to %s", req.Status)
+			}
+
+			_, err = tx.Exec(`
+				INSERT INTO order_status_history (order_id, status, notes, updated_by)
+				VALUES ($1, $2, $3, $4)
+			`, orderID, req.Status, notes, userID)
+
+			// Don't fail if history insert fails
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete bulk update", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":        "Bulk status update completed",
+		"updated_count":  updatedCount,
+		"total_orders":   len(req.OrderIDs),
+	})
+}
+
+// handleGetRouteOptimizationSuggestions provides optimization suggestions for route creation
+func (h *AdminHandler) handleGetRouteOptimizationSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		OrderIDs []int `json:"order_ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.OrderIDs) == 0 {
+		http.Error(w, "No orders specified", http.StatusBadRequest)
+		return
+	}
+
+	// Get orders with addresses
+	rows, err := h.db.Query(`
+		SELECT o.id, o.pickup_date, o.pickup_time_slot, o.delivery_date, o.delivery_time_slot,
+			   pa.street_address as pickup_address, pa.city as pickup_city, pa.zip_code as pickup_zip,
+			   da.street_address as delivery_address, da.city as delivery_city, da.zip_code as delivery_zip,
+			   u.first_name, u.last_name
+		FROM orders o
+		JOIN addresses pa ON o.pickup_address_id = pa.id
+		JOIN addresses da ON o.delivery_address_id = da.id
+		JOIN users u ON o.user_id = u.id
+		WHERE o.id = ANY($1)
+	`, pq.Array(req.OrderIDs))
+
+	if err != nil {
+		http.Error(w, "Failed to fetch orders", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var orders []OrderLocation
+	for rows.Next() {
+		var order OrderLocation
+		var firstName, lastName string
+		err := rows.Scan(
+			&order.ID, &order.PickupDate, &order.PickupTimeSlot,
+			&order.DeliveryDate, &order.DeliveryTimeSlot,
+			&order.PickupAddress, &order.PickupCity, &order.PickupZip,
+			&order.DeliveryAddress, &order.DeliveryCity, &order.DeliveryZip,
+			&firstName, &lastName,
+		)
+		if err != nil {
+			continue
+		}
+		order.CustomerName = fmt.Sprintf("%s %s", firstName, lastName)
+		orders = append(orders, order)
+	}
+
+	// Enhanced optimization suggestions
+	suggestions := map[string]interface{}{
+		"orders": orders,
+		"suggestions": []map[string]interface{}{
+			{
+				"type": "pickup_delivery_cycle",
+				"message": "Routes optimized for efficient pickup→delivery cycles on the same day. Perfect for 'one-swoop' service where drivers pick up and deliver in sequence.",
+				"groups": groupOrdersByPickupDeliveryCycle(orders),
+			},
+			{
+				"type": "geographic_clusters",
+				"message": "Groups orders by geographic proximity for both pickup and delivery locations. Minimizes driving distance between stops.",
+				"groups": groupOrdersByGeographicClusters(orders),
+			},
+			{
+				"type": "time_slot_grouping",
+				"message": "Orders grouped by customer-selected pickup time windows. Useful for coordinating driver schedules.",
+				"groups": groupOrdersByTimeSlot(orders),
+			},
+		},
+		"total_orders": len(orders),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
+
+// Helper function to group orders by time slot
+func groupOrdersByTimeSlot(orders []OrderLocation) map[string][]int {
+	groups := make(map[string][]int)
+	for _, order := range orders {
+		slot := order.PickupTimeSlot
+		groups[slot] = append(groups[slot], order.ID)
+	}
+	return groups
+}
+
+// Helper function to group orders by zip code  
+func groupOrdersByZipCode(orders []OrderLocation) map[string][]int {
+	groups := make(map[string][]int)
+	for _, order := range orders {
+		zip := order.PickupZip
+		groups[zip] = append(groups[zip], order.ID)
+	}
+	return groups
+}
+
+// Enhanced function to group orders by pickup-delivery cycles
+func groupOrdersByPickupDeliveryCycle(orders []OrderLocation) map[string][]int {
+	groups := make(map[string][]int)
+	
+	for _, order := range orders {
+		// Create a cycle key based on pickup date/time and delivery date/time
+		cycleKey := fmt.Sprintf("%s %s → %s %s", 
+			order.PickupDate, order.PickupTimeSlot,
+			order.DeliveryDate, order.DeliveryTimeSlot)
+		
+		groups[cycleKey] = append(groups[cycleKey], order.ID)
+	}
+	
+	// Only return groups with more than 1 order (efficiency gains)
+	efficientGroups := make(map[string][]int)
+	for key, orderIds := range groups {
+		if len(orderIds) > 1 {
+			efficientGroups[key] = orderIds
+		}
+	}
+	
+	return efficientGroups
+}
+
+// Enhanced function to create geographic clusters considering both pickup and delivery
+func groupOrdersByGeographicClusters(orders []OrderLocation) map[string][]int {
+	groups := make(map[string][]int)
+	
+	for _, order := range orders {
+		// Create geographic cluster key
+		clusterKey := fmt.Sprintf("%s→%s", order.PickupZip, order.DeliveryZip)
+		groups[clusterKey] = append(groups[clusterKey], order.ID)
+	}
+	
+	// Group similar routes together
+	efficientGroups := make(map[string][]int)
+	
+	// First, group same pickup to same delivery zip
+	for key, orderIds := range groups {
+		if len(orderIds) > 1 {
+			efficientGroups[key+" - Identical Route"] = orderIds
+		}
+	}
+	
+	// Then, group by pickup zip (multiple deliveries from same pickup area)
+	pickupGroups := make(map[string][]int)
+	for _, order := range orders {
+		pickupGroups[order.PickupZip] = append(pickupGroups[order.PickupZip], order.ID)
+	}
+	
+	for zip, orderIds := range pickupGroups {
+		if len(orderIds) > 2 { // More than 2 orders from same pickup area
+			efficientGroups["Zone "+zip+" - Multiple Pickups"] = orderIds
+		}
+	}
+	
+	return efficientGroups
 }

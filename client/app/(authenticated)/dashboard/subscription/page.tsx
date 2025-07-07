@@ -4,9 +4,20 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
-import { Sparkles, Calendar, CheckCircle, ArrowLeft, Package } from 'lucide-react'
-import { SubscriptionPlan, Subscription } from '@/lib/api'
+import { Sparkles, Calendar, CheckCircle, ArrowLeft, Package, Settings, Clock, MapPin, Save } from 'lucide-react'
+import { 
+  SubscriptionPlan, 
+  Subscription, 
+  SubscriptionPreferences, 
+  CreateSubscriptionPreferencesRequest,
+  subscriptionApi,
+  addressApi,
+  serviceApi,
+  Address,
+  Service
+} from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
+import { TumbleButton } from '@/components/ui/tumble-button'
 
 export default function SubscriptionPage() {
   const { data: session, status } = useSession()
@@ -17,6 +28,13 @@ export default function SubscriptionPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const router = useRouter()
+
+  // Subscription preferences state
+  const [preferences, setPreferences] = useState<SubscriptionPreferences | null>(null)
+  const [addresses, setAddresses] = useState<Address[]>([])
+  const [services, setServices] = useState<Service[]>([])
+  const [preferencesLoading, setPreferencesLoading] = useState(false)
+  const [showPreferences, setShowPreferences] = useState(false)
 
   // Load subscription plans and current subscription
   useEffect(() => {
@@ -67,6 +85,29 @@ export default function SubscriptionPage() {
 
     loadData()
   }, [session, status])
+
+  // Load subscription preferences and related data
+  const loadPreferencesData = async () => {
+    if (!session?.user) return
+
+    setPreferencesLoading(true)
+    try {
+      const [prefsData, addressesData, servicesData] = await Promise.all([
+        subscriptionApi.getSubscriptionPreferences(session),
+        addressApi.getAddresses(session),
+        serviceApi.getServices()
+      ])
+
+      setPreferences(prefsData)
+      setAddresses(addressesData)
+      setServices(servicesData)
+    } catch (err) {
+      console.error('Error loading preferences data:', err)
+      setError('Failed to load preferences data')
+    } finally {
+      setPreferencesLoading(false)
+    }
+  }
 
   const handleSubscribe = async (planId: number) => {
     if (!session?.user) {
@@ -184,6 +225,26 @@ export default function SubscriptionPage() {
     }
   }
 
+  const handleSavePreferences = async (prefsData: CreateSubscriptionPreferencesRequest) => {
+    if (!session?.user) return
+
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+    
+    try {
+      await subscriptionApi.createOrUpdateSubscriptionPreferences(session, prefsData)
+      setSuccess('Preferences saved successfully')
+      
+      // Reload preferences to get updated data
+      await loadPreferencesData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save preferences')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Helper function to determine if a plan is popular (Weekly Standard)
   const isPlanPopular = (plan: SubscriptionPlan) => {
     return plan.name === 'Weekly Standard'
@@ -257,32 +318,35 @@ export default function SubscriptionPage() {
               
               <div className="space-y-3">
                 {currentSubscription.status === 'active' && (
-                  <button
+                  <TumbleButton
                     onClick={() => handleUpdateSubscription('paused')}
                     disabled={loading}
-                    className="w-full bg-yellow-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-yellow-600 transition-all disabled:opacity-50"
+                    variant="outline"
+                    className="w-full border-yellow-500 text-yellow-600 hover:bg-yellow-50"
                   >
                     {loading ? 'Processing...' : 'Pause Subscription'}
-                  </button>
+                  </TumbleButton>
                 )}
                 
                 {currentSubscription.status === 'paused' && (
-                  <button
+                  <TumbleButton
                     onClick={() => handleUpdateSubscription('active')}
                     disabled={loading}
-                    className="w-full bg-emerald-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-emerald-600 transition-all disabled:opacity-50"
+                    variant="default"
+                    className="w-full"
                   >
                     {loading ? 'Processing...' : 'Resume Subscription'}
-                  </button>
+                  </TumbleButton>
                 )}
                 
-                <button
+                <TumbleButton
                   onClick={handleCancelSubscription}
                   disabled={loading}
-                  className="w-full bg-red-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-red-600 transition-all disabled:opacity-50"
+                  variant="destructive"
+                  className="w-full"
                 >
                   {loading ? 'Processing...' : 'Cancel Subscription'}
-                </button>
+                </TumbleButton>
               </div>
             </div>
             
@@ -298,6 +362,53 @@ export default function SubscriptionPage() {
               })}</p>
               <p><strong>Usage:</strong> {currentSubscription.pickups_used_this_period} of {currentSubscription.plan?.pickups_per_month} pickups used this period</p>
             </div>
+          </div>
+        )}
+
+        {/* Subscription Preferences Section */}
+        {currentSubscription && (
+          <div className="bg-white rounded-2xl shadow-lg max-w-4xl mx-auto mb-12">
+            <div className="p-6 border-b border-slate-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Settings className="w-6 h-6 text-purple-600 mr-3" />
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-900">Auto-Schedule Preferences</h3>
+                    <p className="text-slate-600 text-sm">Set your default preferences for automatic order scheduling</p>
+                  </div>
+                </div>
+                <TumbleButton
+                  onClick={() => {
+                    setShowPreferences(!showPreferences)
+                    if (!showPreferences && !preferences) {
+                      loadPreferencesData()
+                    }
+                  }}
+                  variant="default"
+                >
+                  {showPreferences ? 'Hide Settings' : 'Configure Settings'}
+                </TumbleButton>
+              </div>
+            </div>
+
+            {showPreferences && (
+              <div className="p-6">
+                {preferencesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mr-3"></div>
+                    <span className="text-slate-600">Loading preferences...</span>
+                  </div>
+                ) : (
+                  <SubscriptionPreferencesForm
+                    preferences={preferences}
+                    addresses={addresses}
+                    services={services}
+                    onSave={handleSavePreferences}
+                    loading={loading}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -360,21 +471,16 @@ export default function SubscriptionPage() {
                   ))}
                 </ul>
 
-                <button
+                <TumbleButton
                   onClick={() => handleSubscribe(plan.id)}
                   disabled={loading || (currentSubscription?.plan_id === plan.id)}
-                  className={`w-full py-4 rounded-xl font-semibold transition-all transform hover:scale-105 shadow-lg ${
-                    currentSubscription?.plan_id === plan.id
-                      ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                      : popular
-                      ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white hover:from-teal-600 hover:to-emerald-600'
-                      : 'bg-gradient-to-r from-slate-600 to-slate-700 text-white hover:from-slate-700 hover:to-slate-800'
-                  } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  variant={currentSubscription?.plan_id === plan.id ? "secondary" : "default"}
+                  className="w-full"
                 >
                   {loading ? 'Processing...' : 
                    currentSubscription?.plan_id === plan.id ? 'Current Plan' :
                    currentSubscription ? 'Switch to Plan' : 'Select Plan'}
-                </button>
+                </TumbleButton>
               </div>
             )
           })}
@@ -464,5 +570,308 @@ export default function SubscriptionPage() {
           </div>
         </div>
     </>
+  )
+}
+
+// Subscription Preferences Form Component
+interface SubscriptionPreferencesFormProps {
+  preferences: SubscriptionPreferences | null
+  addresses: Address[]
+  services: Service[]
+  onSave: (data: CreateSubscriptionPreferencesRequest) => void
+  loading: boolean
+}
+
+function SubscriptionPreferencesForm({ preferences, addresses, services, onSave, loading }: SubscriptionPreferencesFormProps) {
+  const [formData, setFormData] = useState<CreateSubscriptionPreferencesRequest>({
+    default_pickup_address_id: preferences?.default_pickup_address_id,
+    default_delivery_address_id: preferences?.default_delivery_address_id,
+    preferred_pickup_time_slot: preferences?.preferred_pickup_time_slot || '8:00 AM - 12:00 PM',
+    preferred_delivery_time_slot: preferences?.preferred_delivery_time_slot || '8:00 AM - 12:00 PM',
+    preferred_pickup_day: preferences?.preferred_pickup_day || 'monday',
+    default_services: preferences?.default_services || [{ service_id: 1, quantity: 1 }],
+    auto_schedule_enabled: preferences?.auto_schedule_enabled ?? true,
+    lead_time_days: preferences?.lead_time_days || 1,
+    special_instructions: preferences?.special_instructions || ''
+  })
+
+  const timeSlots = [
+    '8:00 AM - 12:00 PM',
+    '12:00 PM - 4:00 PM',
+    '4:00 PM - 8:00 PM'
+  ]
+
+  const weekdays = [
+    { value: 'monday', label: 'Monday' },
+    { value: 'tuesday', label: 'Tuesday' },
+    { value: 'wednesday', label: 'Wednesday' },
+    { value: 'thursday', label: 'Thursday' },
+    { value: 'friday', label: 'Friday' },
+    { value: 'saturday', label: 'Saturday' }
+  ]
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSave(formData)
+  }
+
+  const updateDefaultService = (index: number, field: 'service_id' | 'quantity', value: number) => {
+    const newServices = [...formData.default_services]
+    newServices[index] = { ...newServices[index], [field]: value }
+    setFormData({ ...formData, default_services: newServices })
+  }
+
+  const addDefaultService = () => {
+    setFormData({
+      ...formData,
+      default_services: [...formData.default_services, { service_id: 1, quantity: 1 }]
+    })
+  }
+
+  const removeDefaultService = (index: number) => {
+    if (formData.default_services.length > 1) {
+      const newServices = formData.default_services.filter((_, i) => i !== index)
+      setFormData({ ...formData, default_services: newServices })
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-8">
+      {/* Auto-Schedule Toggle */}
+      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <Clock className="w-5 h-5 text-purple-600 mr-2" />
+            <div>
+              <h4 className="font-semibold text-slate-900">Auto-Schedule Weekly Pickups</h4>
+              <p className="text-sm text-slate-600">
+                Automatically schedule your monthly pickups using your preferences below
+              </p>
+              <p className="text-xs text-purple-600 mt-1">
+                💡 When enabled, we'll create orders for you so you never have to remember to schedule pickups
+              </p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.auto_schedule_enabled}
+              onChange={(e) => setFormData({ ...formData, auto_schedule_enabled: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
+        {/* Default Addresses */}
+        <div className="space-y-4">
+          <h4 className="font-semibold text-slate-900 flex items-center">
+            <MapPin className="w-4 h-4 mr-2" />
+            Default Addresses
+          </h4>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Pickup Address</label>
+            <select
+              value={formData.default_pickup_address_id || ''}
+              onChange={(e) => setFormData({ 
+                ...formData, 
+                default_pickup_address_id: e.target.value ? parseInt(e.target.value) : undefined 
+              })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              <option value="">Select pickup address...</option>
+              {addresses.map(addr => (
+                <option key={addr.id} value={addr.id}>
+                  {addr.street_address}, {addr.city}, {addr.state} {addr.zip_code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Delivery Address</label>
+            <select
+              value={formData.default_delivery_address_id || ''}
+              onChange={(e) => setFormData({ 
+                ...formData, 
+                default_delivery_address_id: e.target.value ? parseInt(e.target.value) : undefined 
+              })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              <option value="">Select delivery address...</option>
+              {addresses.map(addr => (
+                <option key={addr.id} value={addr.id}>
+                  {addr.street_address}, {addr.city}, {addr.state} {addr.zip_code}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Your Auto-Schedule Settings */}
+        <div className="space-y-4">
+          <div>
+            <h4 className="font-semibold text-slate-900 flex items-center">
+              <Calendar className="w-4 h-4 mr-2" />
+              Your Weekly Pickup Schedule
+            </h4>
+            <p className="text-sm text-slate-600 mt-1">
+              Choose when you want your regular pickups to happen each week
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Which day of the week?
+              <span className="text-xs text-slate-500 font-normal ml-1">(We'll pickup on this day every week)</span>
+            </label>
+            <select
+              value={formData.preferred_pickup_day}
+              onChange={(e) => setFormData({ ...formData, preferred_pickup_day: e.target.value })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              {weekdays.map(day => (
+                <option key={day.value} value={day.value}>{day.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Pickup time window
+              <span className="text-xs text-slate-500 font-normal ml-1">(When our driver will arrive)</span>
+            </label>
+            <select
+              value={formData.preferred_pickup_time_slot}
+              onChange={(e) => setFormData({ ...formData, preferred_pickup_time_slot: e.target.value })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              {timeSlots.map(slot => (
+                <option key={slot} value={slot}>{slot}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Delivery time window
+              <span className="text-xs text-slate-500 font-normal ml-1">(Usually 1-2 days after pickup)</span>
+            </label>
+            <select
+              value={formData.preferred_delivery_time_slot}
+              onChange={(e) => setFormData({ ...formData, preferred_delivery_time_slot: e.target.value })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              {timeSlots.map(slot => (
+                <option key={slot} value={slot}>{slot}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              How far ahead to create orders?
+              <span className="text-xs text-slate-500 font-normal ml-1">(So you can see what's coming up)</span>
+            </label>
+            <select
+              value={formData.lead_time_days}
+              onChange={(e) => setFormData({ ...formData, lead_time_days: parseInt(e.target.value) })}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            >
+              <option value={1}>1 day ahead (Create tomorrow's order today)</option>
+              <option value={2}>2 days ahead (Create orders 2 days early)</option>
+              <option value={3}>3 days ahead (Create orders 3 days early)</option>
+              <option value={7}>1 week ahead (Create orders a week early)</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              📅 Example: If you choose "1 day ahead" and prefer Monday pickups, we'll create your Monday pickup order on Sunday.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* What to pickup each time */}
+      <div>
+        <div className="mb-4">
+          <h4 className="font-semibold text-slate-900 flex items-center">
+            <Package className="w-4 h-4 mr-2" />
+            What should we pick up each time?
+          </h4>
+          <p className="text-sm text-slate-600 mt-1">
+            These services will be included in every auto-scheduled pickup (covered by your subscription)
+          </p>
+        </div>
+        <div className="space-y-3">
+          {formData.default_services.map((service, index) => (
+            <div key={index} className="flex items-center space-x-3 p-3 border border-slate-200 rounded-lg">
+              <select
+                value={service.service_id}
+                onChange={(e) => updateDefaultService(index, 'service_id', parseInt(e.target.value))}
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              >
+                {services.filter(service => service.name !== 'pickup_service').map(s => (
+                  <option key={s.id} value={s.id}>{s.name.replaceAll('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={service.quantity}
+                onChange={(e) => updateDefaultService(index, 'quantity', parseInt(e.target.value))}
+                className="w-20 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              {formData.default_services.length > 1 && (
+                <TumbleButton
+                  type="button"
+                  onClick={() => removeDefaultService(index)}
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-600 hover:text-red-700"
+                >
+                  Remove
+                </TumbleButton>
+              )}
+            </div>
+          ))}
+          <TumbleButton
+            type="button"
+            onClick={addDefaultService}
+            variant="ghost"
+            size="sm"
+            className="text-purple-600 hover:text-purple-700"
+          >
+            + Add Service
+          </TumbleButton>
+        </div>
+      </div>
+
+      {/* Special Instructions */}
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-2">Special Instructions</label>
+        <textarea
+          value={formData.special_instructions}
+          onChange={(e) => setFormData({ ...formData, special_instructions: e.target.value })}
+          placeholder="Any special handling instructions for your recurring orders..."
+          rows={3}
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+        />
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-end pt-4">
+        <TumbleButton
+          type="submit"
+          disabled={loading}
+          variant="default"
+        >
+          <Save className="w-4 h-4" />
+          {loading ? 'Saving...' : 'Save Preferences'}
+        </TumbleButton>
+      </div>
+    </form>
   )
 }

@@ -37,6 +37,7 @@ type Server struct {
 	driverApps *DriverApplicationHandler
 	driverRoutes *DriverRouteHandler
 	driverEarnings *DriverEarningsHandler
+	scheduler *AutoScheduler
 }
 
 type HealthResponse struct {
@@ -89,6 +90,10 @@ func main() {
 	server.driverApps = NewDriverApplicationHandler(server.db)
 	server.driverRoutes = NewDriverRouteHandler(server.db, server.realtime)
 	server.driverEarnings = NewDriverEarningsHandler(server.db)
+	
+	// Initialize and start auto-scheduler
+	server.scheduler = NewAutoScheduler(server.db)
+	server.scheduler.Start()
 
 	// Set up HTTP routes with Gorilla Mux
 	r := mux.NewRouter()
@@ -124,6 +129,8 @@ func main() {
 	api.HandleFunc("/subscriptions/current", server.subscriptions.handleGetSubscription)
 	api.HandleFunc("/subscriptions/create", server.subscriptions.handleCreateSubscription)
 	api.HandleFunc("/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage)
+	api.HandleFunc("/subscriptions/preferences", server.subscriptions.handleGetSubscriptionPreferences).Methods("GET")
+	api.HandleFunc("/subscriptions/preferences", server.subscriptions.handleCreateOrUpdateSubscriptionPreferences).Methods("POST", "PUT")
 	api.HandleFunc("/subscriptions/{id}", server.subscriptions.handleUpdateSubscription)
 	api.HandleFunc("/subscriptions/{id}/cancel", server.subscriptions.handleCancelSubscription)
 
@@ -137,13 +144,19 @@ func main() {
 	api.HandleFunc("/services", server.services.handleGetServices)
 
 	// Admin routes (all require admin role)
-	api.HandleFunc("/admin/users", server.admin.requireAdmin(server.admin.handleGetUsers))
+	api.HandleFunc("/admin/users", server.admin.requireAdmin(server.admin.handleGetUsers)).Methods("GET")
+	api.HandleFunc("/admin/users", server.admin.requireAdmin(server.admin.handleCreateUser)).Methods("POST")
+	api.HandleFunc("/admin/users/{id}", server.admin.requireAdmin(server.admin.handleUpdateUser)).Methods("PUT")
+	api.HandleFunc("/admin/users/{id}", server.admin.requireAdmin(server.admin.handleDeleteUser)).Methods("DELETE")
 	api.HandleFunc("/admin/users/{id}/role", server.admin.requireAdmin(server.admin.handleUpdateUserRole))
+	api.HandleFunc("/admin/users/{id}/status", server.admin.requireAdmin(server.admin.handleUpdateUserStatus)).Methods("POST")
 	api.HandleFunc("/admin/orders/summary", server.admin.requireAdmin(server.admin.handleGetOrdersSummary))
 	api.HandleFunc("/admin/orders", server.admin.requireAdmin(server.admin.handleGetAllOrders))
 	api.HandleFunc("/admin/analytics/revenue", server.admin.requireAdmin(server.admin.handleGetRevenueAnalytics))
 	api.HandleFunc("/admin/drivers/stats", server.admin.requireAdmin(server.admin.handleGetDriverStats))
 	api.HandleFunc("/admin/routes/assign", server.admin.requireAdmin(server.admin.handleAssignDriverToRoute))
+	api.HandleFunc("/admin/orders/bulk-status", server.admin.requireAdmin(server.admin.handleBulkOrderStatusUpdate))
+	api.HandleFunc("/admin/routes/optimization-suggestions", server.admin.requireAdmin(server.admin.handleGetRouteOptimizationSuggestions))
 
 	// Payment routes
 	api.HandleFunc("/payments/setup-intent", server.payments.handleCreateSetupIntent)

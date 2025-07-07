@@ -2,6 +2,7 @@ import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
 
 const tumbleIconButtonVariants = cva(
   "relative inline-flex items-center justify-center rounded-lg font-medium transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A7E7E1]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer border-0 outline-0 select-none overflow-hidden",
@@ -36,18 +37,36 @@ export interface TumbleIconButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof tumbleIconButtonVariants> {
   asChild?: boolean
+  tooltip?: string
+  tooltipSide?: "top" | "right" | "bottom" | "left"
 }
 
 const TumbleIconButton = React.forwardRef<HTMLButtonElement, TumbleIconButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, tooltip, tooltipSide = "top", ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
-    return (
+    
+    const button = (
       <Comp
         className={cn(tumbleIconButtonVariants({ variant, size, className }))}
         ref={ref}
         {...props}
       />
     )
+
+    if (tooltip) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {button}
+          </TooltipTrigger>
+          <TooltipContent side={tooltipSide}>
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      )
+    }
+
+    return button
   }
 )
 TumbleIconButton.displayName = "TumbleIconButton"

@@ -564,3 +564,397 @@ func BenchmarkSubscriptionHandler_GetPlans(b *testing.B) {
 		handler.handleGetPlans(w, req)
 	}
 }
+
+// ===== SUBSCRIPTION PREFERENCES TESTS =====
+
+func TestSubscriptionHandler_GetSubscriptionPreferences_NoPreferences(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// Create request with user context
+	req := httptest.NewRequest("GET", "/api/subscriptions/preferences", nil)
+	w := httptest.NewRecorder()
+
+	handler.handleGetSubscriptionPreferences(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var prefs SubscriptionPreferences
+	if err := json.Unmarshal(w.Body.Bytes(), &prefs); err != nil {
+		t.Errorf("Failed to unmarshal response: %v", err)
+	}
+
+	// Check default values are returned
+	if prefs.UserID != userID {
+		t.Errorf("Expected user_id %d, got %d", userID, prefs.UserID)
+	}
+	if prefs.PreferredPickupTimeSlot != "8:00 AM - 12:00 PM" {
+		t.Errorf("Expected default pickup time slot, got %s", prefs.PreferredPickupTimeSlot)
+	}
+	if prefs.PreferredPickupDay != "monday" {
+		t.Errorf("Expected default pickup day monday, got %s", prefs.PreferredPickupDay)
+	}
+	if !prefs.AutoScheduleEnabled {
+		t.Error("Expected auto schedule to be enabled by default")
+	}
+	// Get the expected standard_bag service ID
+	var expectedServiceID int
+	err := db.QueryRow("SELECT id FROM services WHERE name = 'standard_bag' AND is_active = true LIMIT 1").Scan(&expectedServiceID)
+	if err != nil {
+		t.Fatalf("Failed to get standard_bag service ID: %v", err)
+	}
+	
+	if len(prefs.DefaultServices) != 1 || prefs.DefaultServices[0].ServiceID != expectedServiceID {
+		t.Errorf("Expected default service to be standard_bag service ID %d, got length=%d, serviceID=%d", 
+			expectedServiceID, len(prefs.DefaultServices), 
+			func() int { if len(prefs.DefaultServices) > 0 { return prefs.DefaultServices[0].ServiceID } else { return -1 } }())
+	}
+}
+
+func TestSubscriptionHandler_CreateSubscriptionPreferences(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
+
+	// Create test addresses
+	pickupAddrID := db.CreateTestAddress(t, userID)
+	deliveryAddrID := db.CreateTestAddress(t, userID)
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// Create request body
+	reqBody := CreateSubscriptionPreferencesRequest{
+		DefaultPickupAddressID:   &pickupAddrID,
+		DefaultDeliveryAddressID: &deliveryAddrID,
+		PreferredPickupTimeSlot:  "12:00 PM - 4:00 PM",
+		PreferredDeliveryTimeSlot: "4:00 PM - 8:00 PM",
+		PreferredPickupDay:       "tuesday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 2}},
+		AutoScheduleEnabled:      true,
+		LeadTimeDays:             2,
+		SpecialInstructions:      "Test instructions",
+	}
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.handleCreateOrUpdateSubscriptionPreferences(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Errorf("Failed to unmarshal response: %v", err)
+	}
+
+	if response["message"] != "Preferences saved successfully" {
+		t.Errorf("Expected success message, got %s", response["message"])
+	}
+
+	// Verify preferences were saved by retrieving them
+	req2 := httptest.NewRequest("GET", "/api/subscriptions/preferences", nil)
+	w2 := httptest.NewRecorder()
+
+	handler.handleGetSubscriptionPreferences(w2, req2)
+
+	var savedPrefs SubscriptionPreferences
+	if err := json.Unmarshal(w2.Body.Bytes(), &savedPrefs); err != nil {
+		t.Errorf("Failed to unmarshal saved preferences: %v", err)
+	}
+
+	// Verify all fields were saved correctly
+	if savedPrefs.DefaultPickupAddressID == nil || *savedPrefs.DefaultPickupAddressID != pickupAddrID {
+		t.Errorf("Expected pickup address ID %d, got %v", pickupAddrID, savedPrefs.DefaultPickupAddressID)
+	}
+	if savedPrefs.DefaultDeliveryAddressID == nil || *savedPrefs.DefaultDeliveryAddressID != deliveryAddrID {
+		t.Errorf("Expected delivery address ID %d, got %v", deliveryAddrID, savedPrefs.DefaultDeliveryAddressID)
+	}
+	if savedPrefs.PreferredPickupTimeSlot != "12:00 PM - 4:00 PM" {
+		t.Errorf("Expected pickup time slot '12:00 PM - 4:00 PM', got %s", savedPrefs.PreferredPickupTimeSlot)
+	}
+	if savedPrefs.PreferredPickupDay != "tuesday" {
+		t.Errorf("Expected pickup day 'tuesday', got %s", savedPrefs.PreferredPickupDay)
+	}
+	if savedPrefs.LeadTimeDays != 2 {
+		t.Errorf("Expected lead time days 2, got %d", savedPrefs.LeadTimeDays)
+	}
+	if savedPrefs.SpecialInstructions != "Test instructions" {
+		t.Errorf("Expected special instructions 'Test instructions', got %s", savedPrefs.SpecialInstructions)
+	}
+}
+
+func TestSubscriptionHandler_UpdateSubscriptionPreferences(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// First create preferences
+	reqBody1 := CreateSubscriptionPreferencesRequest{
+		PreferredPickupTimeSlot:  "8:00 AM - 12:00 PM",
+		PreferredDeliveryTimeSlot: "8:00 AM - 12:00 PM",
+		PreferredPickupDay:       "monday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 1}},
+		AutoScheduleEnabled:      true,
+		LeadTimeDays:             1,
+		SpecialInstructions:      "Original instructions",
+	}
+
+	body1, _ := json.Marshal(reqBody1)
+	req1 := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBuffer(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+
+	handler.handleCreateOrUpdateSubscriptionPreferences(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Errorf("Expected status %d for create, got %d", http.StatusOK, w1.Code)
+	}
+
+	// Now update preferences
+	reqBody2 := CreateSubscriptionPreferencesRequest{
+		PreferredPickupTimeSlot:  "4:00 PM - 8:00 PM",
+		PreferredDeliveryTimeSlot: "4:00 PM - 8:00 PM",
+		PreferredPickupDay:       "friday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 3}},
+		AutoScheduleEnabled:      false,
+		LeadTimeDays:             3,
+		SpecialInstructions:      "Updated instructions",
+	}
+
+	body2, _ := json.Marshal(reqBody2)
+	req2 := httptest.NewRequest("PUT", "/api/subscriptions/preferences", bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+
+	handler.handleCreateOrUpdateSubscriptionPreferences(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Errorf("Expected status %d for update, got %d", http.StatusOK, w2.Code)
+	}
+
+	// Verify preferences were updated
+	req3 := httptest.NewRequest("GET", "/api/subscriptions/preferences", nil)
+	w3 := httptest.NewRecorder()
+
+	handler.handleGetSubscriptionPreferences(w3, req3)
+
+	var updatedPrefs SubscriptionPreferences
+	if err := json.Unmarshal(w3.Body.Bytes(), &updatedPrefs); err != nil {
+		t.Errorf("Failed to unmarshal updated preferences: %v", err)
+	}
+
+	// Verify updated fields
+	if updatedPrefs.PreferredPickupTimeSlot != "4:00 PM - 8:00 PM" {
+		t.Errorf("Expected updated pickup time slot '4:00 PM - 8:00 PM', got %s", updatedPrefs.PreferredPickupTimeSlot)
+	}
+	if updatedPrefs.PreferredPickupDay != "friday" {
+		t.Errorf("Expected updated pickup day 'friday', got %s", updatedPrefs.PreferredPickupDay)
+	}
+	if updatedPrefs.AutoScheduleEnabled {
+		t.Error("Expected auto schedule to be disabled after update")
+	}
+	if updatedPrefs.LeadTimeDays != 3 {
+		t.Errorf("Expected updated lead time days 3, got %d", updatedPrefs.LeadTimeDays)
+	}
+	if updatedPrefs.SpecialInstructions != "Updated instructions" {
+		t.Errorf("Expected updated special instructions, got %s", updatedPrefs.SpecialInstructions)
+	}
+}
+
+func TestSubscriptionHandler_CreateSubscriptionPreferences_InvalidAddress(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
+
+	// Create another user and their address
+	otherUserID := db.CreateTestUser(t, "other@example.com", "Other", "User")
+	otherUserAddrID := db.CreateTestAddress(t, otherUserID)
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// Try to create preferences with another user's address
+	reqBody := CreateSubscriptionPreferencesRequest{
+		DefaultPickupAddressID:   &otherUserAddrID, // This should fail
+		PreferredPickupTimeSlot:  "8:00 AM - 12:00 PM",
+		PreferredDeliveryTimeSlot: "8:00 AM - 12:00 PM",
+		PreferredPickupDay:       "monday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 1}},
+		AutoScheduleEnabled:      true,
+		LeadTimeDays:             1,
+	}
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.handleCreateOrUpdateSubscriptionPreferences(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d for invalid address, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	if !bytes.Contains(w.Body.Bytes(), []byte("Invalid pickup address")) {
+		t.Errorf("Expected 'Invalid pickup address' error message, got %s", w.Body.String())
+	}
+}
+
+func TestSubscriptionHandler_GetSubscriptionPreferences_Unauthorized(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Create request without authorization
+	req := httptest.NewRequest("GET", "/api/subscriptions/preferences", nil)
+	w := httptest.NewRecorder()
+
+	handler.handleGetSubscriptionPreferences(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status %d for unauthorized request, got %d", http.StatusUnauthorized, w.Code)
+	}
+}
+
+func TestSubscriptionHandler_CreateSubscriptionPreferences_InvalidJSON(t *testing.T) {
+	db := SetupTestDB(t)
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
+
+	// Create handler
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// Create request with invalid JSON
+	req := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBufferString("invalid json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.handleCreateOrUpdateSubscriptionPreferences(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d for invalid JSON, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+// Benchmark tests for subscription preferences
+func BenchmarkSubscriptionHandler_GetSubscriptionPreferences(b *testing.B) {
+	db := SetupTestDB(&testing.T{})
+	defer db.CleanupTestDB()
+
+	// Create test user and preferences
+	userID := db.CreateTestUser(&testing.T{}, "test@example.com", "Test", "User")
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	// Create some preferences first
+	reqBody := CreateSubscriptionPreferencesRequest{
+		PreferredPickupTimeSlot:  "8:00 AM - 12:00 PM",
+		PreferredDeliveryTimeSlot: "8:00 AM - 12:00 PM",
+		PreferredPickupDay:       "monday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 1}},
+		AutoScheduleEnabled:      true,
+		LeadTimeDays:             1,
+	}
+	body, _ := json.Marshal(reqBody)
+	setupReq := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBuffer(body))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupW := httptest.NewRecorder()
+	handler.handleCreateOrUpdateSubscriptionPreferences(setupW, setupReq)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest("GET", "/api/subscriptions/preferences", nil)
+		w := httptest.NewRecorder()
+		handler.handleGetSubscriptionPreferences(w, req)
+	}
+}
+
+func BenchmarkSubscriptionHandler_CreateSubscriptionPreferences(b *testing.B) {
+	db := SetupTestDB(&testing.T{})
+	defer db.CleanupTestDB()
+
+	// Create test user
+	userID := db.CreateTestUser(&testing.T{}, "test@example.com", "Test", "User")
+	handler := NewSubscriptionHandler(db.DB)
+
+	// Mock auth for test
+	handler.getUserID = func(r *http.Request, db *sql.DB) (int, error) {
+		return userID, nil
+	}
+
+	reqBody := CreateSubscriptionPreferencesRequest{
+		PreferredPickupTimeSlot:  "8:00 AM - 12:00 PM",
+		PreferredDeliveryTimeSlot: "8:00 AM - 12:00 PM",
+		PreferredPickupDay:       "monday",
+		DefaultServices:          []ServiceRequest{{ServiceID: 1, Quantity: 1}},
+		AutoScheduleEnabled:      true,
+		LeadTimeDays:             1,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/subscriptions/preferences", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.handleCreateOrUpdateSubscriptionPreferences(w, req)
+		
+		// Clean up for next iteration
+		db.DB.Exec("DELETE FROM subscription_preferences WHERE user_id = $1", userID)
+	}
+}

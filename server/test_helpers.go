@@ -109,8 +109,8 @@ func (db *TestDB) CreateTestUserWithPassword(t *testing.T, email, firstName, las
 	
 	var userID int
 	err := db.QueryRow(`
-		INSERT INTO users (email, password_hash, first_name, last_name, email_verified_at)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		INSERT INTO users (email, password_hash, first_name, last_name, status, email_verified_at)
+		VALUES ($1, $2, $3, $4, 'active', CURRENT_TIMESTAMP)
 		RETURNING id`,
 		email, passwordHash, firstName, lastName,
 	).Scan(&userID)

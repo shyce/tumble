@@ -107,12 +107,14 @@ export default function ApplyDriverPage() {
             <p className="text-slate-600 mb-8 leading-relaxed">
               Thank you for your interest in becoming a Tumble driver. We'll review your application and get back to you soon.
             </p>
-            <button
+            <TumbleButton
               onClick={() => router.push('/dashboard')}
-              className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-teal-600 hover:to-emerald-600 transition-all transform hover:scale-105 shadow-lg"
+              variant="default"
+              size="lg"
+              className="w-full"
             >
               Back to Dashboard
-            </button>
+            </TumbleButton>
           </div>
         </div>
       </>

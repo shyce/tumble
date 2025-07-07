@@ -5,13 +5,15 @@ import { useState } from "react"
 import { useSession } from "next-auth/react"
 import { toast } from "sonner"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  TumbleDialog,
+  TumbleDialogContent,
+  TumbleDialogDescription,
+  TumbleDialogHeader,
+  TumbleDialogTitle,
+  TumbleDialogTrigger,
+  TumbleDialogBody,
+  TumbleDialogFooter,
+} from "@/components/ui/tumble-dialog"
 import { TumbleInput } from "@/components/ui/tumble-input"
 import { TumbleButton } from "@/components/ui/tumble-button"
 import { TumbleIconButton } from "@/components/ui/tumble-icon-button"
@@ -105,20 +107,21 @@ export function ChangePasswordModal({ children }: ChangePasswordModalProps) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+    <TumbleDialog open={open} onOpenChange={setOpen}>
+      <TumbleDialogTrigger asChild>
         {children}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center">
+      </TumbleDialogTrigger>
+      <TumbleDialogContent className="sm:max-w-md">
+        <TumbleDialogHeader>
+          <TumbleDialogTitle className="flex items-center">
             <Lock className="w-5 h-5 mr-2 text-[#A7E7E1]" />
             Change Password
-          </DialogTitle>
-          <DialogDescription>
+          </TumbleDialogTitle>
+          <TumbleDialogDescription>
             Update your account password. Make sure to use a strong, unique password.
-          </DialogDescription>
-        </DialogHeader>
+          </TumbleDialogDescription>
+        </TumbleDialogHeader>
+        <TumbleDialogBody>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
@@ -184,23 +187,24 @@ export function ChangePasswordModal({ children }: ChangePasswordModalProps) {
             </TumbleIconButton>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4">
-            <TumbleButton
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-            >
-              Cancel
-            </TumbleButton>
-            <TumbleButton
-              type="submit"
-              disabled={loading}
-            >
-              {loading ? 'Updating...' : 'Update Password'}
-            </TumbleButton>
-          </div>
         </form>
-      </DialogContent>
-    </Dialog>
+        </TumbleDialogBody>
+        <TumbleDialogFooter>
+          <TumbleButton
+            type="button"
+            variant="outline"
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </TumbleButton>
+          <TumbleButton
+            onClick={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? 'Updating...' : 'Update Password'}
+          </TumbleButton>
+        </TumbleDialogFooter>
+      </TumbleDialogContent>
+    </TumbleDialog>
   )
 }

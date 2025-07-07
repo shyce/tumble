@@ -25,12 +25,11 @@ import {
   Shield
 } from 'lucide-react'
 import TumbleLogo from './TumbleLogo'
+import { TumbleButton } from './ui/tumble-button'
+import { TumbleIconButton } from './ui/tumble-icon-button'
 
-interface MainNavigationProps {
-  fullWidth?: boolean
-}
 
-export default function MainNavigation({ fullWidth = false }: MainNavigationProps) {
+export default function MainNavigation() {
   const { data: session } = useSession()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
@@ -192,8 +191,10 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
                   
                   return (
                     <div key={item.label} className="relative">
-                      <button
+                      <TumbleButton
                         onClick={() => toggleDropdown(item.label)}
+                        variant="ghost"
+                        size="sm"
                         className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                           isActive
                             ? `${
@@ -207,7 +208,7 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
                         <Icon className="w-4 h-4" />
                         <span className="hidden lg:inline">{item.label}</span>
                         <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-                      </button>
+                      </TumbleButton>
                       
                       {isOpen && (
                         <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
@@ -268,29 +269,37 @@ export default function MainNavigation({ fullWidth = false }: MainNavigationProp
                   </div>
 
                   {/* Sign Out Button */}
-                  <button
+                  <TumbleButton
                     onClick={handleSignOut}
+                    variant="ghost"
+                    size="sm"
                     className="flex items-center space-x-2 px-3 py-2 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg transition-all duration-200"
                   >
                     <LogOut className="w-4 h-4" />
                     <span>Sign Out</span>
-                  </button>
+                  </TumbleButton>
                 </div>
 
                 {/* Mobile Layout */}
                 <div className="md:hidden flex items-center space-x-2">
-                  <button
+                  <TumbleIconButton
                     onClick={handleSignOut}
-                    className="flex items-center space-x-2 px-3 py-2 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg transition-all duration-200"
+                    variant="ghost"
+                    size="default"
+                    tooltip="Sign Out"
+                    className="text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg transition-all duration-200"
                   >
                     <LogOut className="w-4 h-4" />
-                  </button>
-                  <button
+                  </TumbleIconButton>
+                  <TumbleIconButton
                     onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                    className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    variant="ghost"
+                    size="default"
+                    tooltip={mobileMenuOpen ? "Close Menu" : "Open Menu"}
+                    className="text-slate-500 hover:text-slate-700 hover:bg-slate-50"
                   >
                     {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-                  </button>
+                  </TumbleIconButton>
                 </div>
               </>
             ) : (

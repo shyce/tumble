@@ -21,25 +21,19 @@ import {
   Phone,
   Mail
 } from 'lucide-react'
-import { adminApi, AdminOrder, User as UserType, DriverStats, RouteAssignmentRequest } from '@/lib/api'
+import { adminApi, AdminOrder, User as UserType, DriverStats, RouteAssignmentRequest, BulkStatusUpdateRequest, OptimizationSuggestionsRequest, OptimizationSuggestionsResponse, statusConfig, OrderStatus } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
-
-interface OrderStatus {
-  color: string
-  icon: any
-  label: string
-}
-
-const statusConfig: Record<string, OrderStatus> = {
-  pending: { color: 'bg-gray-100 text-gray-800', icon: Clock, label: 'Pending' },
-  scheduled: { color: 'bg-blue-100 text-blue-800', icon: Calendar, label: 'Scheduled' },
-  picked_up: { color: 'bg-orange-100 text-orange-800', icon: Truck, label: 'Picked Up' },
-  in_process: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'In Process' },
-  ready: { color: 'bg-purple-100 text-purple-800', icon: CheckCircle, label: 'Ready' },
-  out_for_delivery: { color: 'bg-indigo-100 text-indigo-800', icon: Truck, label: 'Out for Delivery' },
-  delivered: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Delivered' },
-  cancelled: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Cancelled' }
-}
+import { TumbleButton } from '@/components/ui/tumble-button'
+import { TumbleIconButton } from '@/components/ui/tumble-icon-button'
+import {
+  TumbleDialog,
+  TumbleDialogContent,
+  TumbleDialogDescription,
+  TumbleDialogFooter,
+  TumbleDialogHeader,
+  TumbleDialogTitle,
+  TumbleDialogBody,
+} from '@/components/ui/tumble-dialog'
 
 export default function AdminOrdersPage() {
   const { data: session, status } = useSession()
@@ -62,11 +56,18 @@ export default function AdminOrdersPage() {
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set())
   const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null)
   const [showRouteAssignment, setShowRouteAssignment] = useState(false)
+  const [showBulkStatusUpdate, setShowBulkStatusUpdate] = useState(false)
+  const [showOptimizationSuggestions, setShowOptimizationSuggestions] = useState(false)
   const [routeAssignment, setRouteAssignment] = useState({
     driver_id: 0,
     route_date: new Date().toISOString().split('T')[0],
     route_type: 'pickup' as 'pickup' | 'delivery'
   })
+  const [bulkStatusUpdate, setBulkStatusUpdate] = useState({
+    status: '',
+    notes: ''
+  })
+  const [optimizationSuggestions, setOptimizationSuggestions] = useState<OptimizationSuggestionsResponse | null>(null)
 
   const loadData = useCallback(async () => {
     if (!session) return
@@ -132,8 +133,8 @@ export default function AdminOrdersPage() {
     return true
   })
 
-  const unassignedOrders = filteredOrders.filter(order => 
-    (order.status === 'scheduled' || order.status === 'pending') && !order.is_assigned
+  const selectableOrders = filteredOrders.filter(order => 
+    !order.is_assigned || order.status === 'ready' || order.status === 'in_process'
   )
 
   const handleOrderSelection = (orderId: number) => {
@@ -178,6 +179,60 @@ export default function AdminOrdersPage() {
     } catch (err) {
       console.error('Error assigning route:', err)
       setError('Failed to assign route')
+    }
+  }
+
+  const handleBulkStatusUpdate = async () => {
+    if (!session || selectedOrders.size === 0 || !bulkStatusUpdate.status) {
+      return
+    }
+
+    setError(null)
+    setSuccessMessage(null)
+    
+    try {
+      const request: BulkStatusUpdateRequest = {
+        order_ids: Array.from(selectedOrders),
+        status: bulkStatusUpdate.status,
+        notes: bulkStatusUpdate.notes
+      }
+
+      const result = await adminApi.bulkUpdateOrderStatus(session, request)
+      setSuccessMessage(`Successfully updated ${result.updated_count} orders to ${bulkStatusUpdate.status}`)
+      
+      // Reset selections and close modal
+      setSelectedOrders(new Set())
+      setShowBulkStatusUpdate(false)
+      setBulkStatusUpdate({ status: '', notes: '' })
+      
+      // Reload data
+      await loadData()
+      
+    } catch (err) {
+      console.error('Error updating order status:', err)
+      setError('Failed to update order status')
+    }
+  }
+
+  const handleGetOptimizationSuggestions = async () => {
+    if (!session || selectedOrders.size === 0) {
+      return
+    }
+
+    setError(null)
+    
+    try {
+      const request: OptimizationSuggestionsRequest = {
+        order_ids: Array.from(selectedOrders)
+      }
+
+      const suggestions = await adminApi.getOptimizationSuggestions(session, request)
+      setOptimizationSuggestions(suggestions)
+      setShowOptimizationSuggestions(true)
+      
+    } catch (err) {
+      console.error('Error getting optimization suggestions:', err)
+      setError('Failed to get optimization suggestions')
     }
   }
 
@@ -287,19 +342,41 @@ export default function AdminOrdersPage() {
             </div>
           </div>
 
-          {/* Route Assignment */}
+          {/* Bulk Actions */}
           <div className="flex items-center space-x-2">
             <span className="text-sm text-slate-600">
               {selectedOrders.size} selected
             </span>
             {selectedOrders.size > 0 && (
-              <button
-                onClick={() => setShowRouteAssignment(true)}
-                className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:from-purple-600 hover:to-indigo-600 transition-all flex items-center space-x-2"
-              >
-                <Route className="w-4 h-4" />
-                <span>Assign Route</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <TumbleIconButton
+                  onClick={() => setShowRouteAssignment(true)}
+                  variant="default"
+                  size="default"
+                  tooltip="Assign or reassign selected orders to a driver route"
+                  tooltipSide="bottom"
+                >
+                  <Route className="w-4 h-4" />
+                </TumbleIconButton>
+                <TumbleIconButton
+                  onClick={() => setShowBulkStatusUpdate(true)}
+                  variant="outline"
+                  size="default"
+                  tooltip="Update status of all selected orders at once"
+                  tooltipSide="bottom"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                </TumbleIconButton>
+                <TumbleIconButton
+                  onClick={handleGetOptimizationSuggestions}
+                  variant="secondary"
+                  size="default"
+                  tooltip="Get route optimization suggestions based on location and time"
+                  tooltipSide="bottom"
+                >
+                  <MapPin className="w-4 h-4" />
+                </TumbleIconButton>
+              </div>
             )}
           </div>
         </div>
@@ -320,8 +397,8 @@ export default function AdminOrdersPage() {
         <div className="bg-white rounded-xl p-4 shadow-lg">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Unassigned</p>
-              <p className="text-2xl font-bold text-orange-600">{unassignedOrders.length}</p>
+              <p className="text-sm text-slate-500">Available to Assign</p>
+              <p className="text-2xl font-bold text-orange-600">{selectableOrders.length}</p>
             </div>
             <Clock className="w-8 h-8 text-orange-500" />
           </div>
@@ -355,40 +432,40 @@ export default function AdminOrdersPage() {
       {/* Orders Table */}
       <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[800px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 w-8">
                   <input 
                     type="checkbox" 
                     className="rounded border-slate-300"
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedOrders(new Set(unassignedOrders.map(o => o.id)))
+                        setSelectedOrders(new Set(selectableOrders.map(o => o.id)))
                       } else {
                         setSelectedOrders(new Set())
                       }
                     }}
                   />
                 </th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Order</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Customer</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Status</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Route Assignment</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Pickup Date</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Total</th>
-                <th className="text-left py-4 px-4 font-semibold text-slate-700">Actions</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[120px]">Order</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[150px]">Customer</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[100px]">Status</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[140px] hidden md:table-cell">Route Assignment</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[120px]">Pickup Date</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[80px]">Total</th>
+                <th className="text-left py-3 px-2 sm:py-4 sm:px-4 font-semibold text-slate-700 min-w-[80px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredOrders.map((order) => {
                 const statusInfo = statusConfig[order.status] || statusConfig.pending
                 const StatusIcon = statusInfo.icon
-                const isSelectable = (order.status === 'scheduled' || order.status === 'pending') && !order.is_assigned
+                const isSelectable = !order.is_assigned || order.status === 'ready' || order.status === 'in_process'
 
                 return (
                   <tr key={order.id} className="hover:bg-slate-50">
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
                       {isSelectable && (
                         <input 
                           type="checkbox" 
@@ -399,31 +476,32 @@ export default function AdminOrdersPage() {
                       )}
                     </td>
                     
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
                       <div>
                         <div className="font-medium text-slate-900">#{order.id}</div>
-                        <div className="text-sm text-slate-500">{formatDateTime(order.created_at)}</div>
+                        <div className="text-xs sm:text-sm text-slate-500">{formatDateTime(order.created_at)}</div>
                       </div>
                     </td>
                     
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
                       <div>
-                        <div className="font-medium text-slate-900">{order.user_name}</div>
-                        <div className="text-sm text-slate-500 flex items-center">
+                        <div className="font-medium text-slate-900 text-sm">{order.user_name}</div>
+                        <div className="text-xs text-slate-500 flex items-center">
                           <Mail className="w-3 h-3 mr-1" />
-                          {order.user_email}
+                          <span className="truncate max-w-[120px] sm:max-w-none">{order.user_email}</span>
                         </div>
                       </div>
                     </td>
                     
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
                       <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${statusInfo.color}`}>
                         <StatusIcon className="w-3 h-3 mr-1" />
-                        {statusInfo.label}
+                        <span className="hidden sm:inline">{statusInfo.label}</span>
+                        <span className="sm:hidden">{statusInfo.label.slice(0, 4)}</span>
                       </div>
                     </td>
 
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4 hidden md:table-cell">
                       {order.is_assigned ? (
                         <div className="flex items-center space-x-2">
                           <div className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -444,27 +522,28 @@ export default function AdminOrdersPage() {
                       )}
                     </td>
                     
-                    <td className="py-4 px-4">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
                       <div>
                         <div className="text-sm font-medium text-slate-900">{formatDate(order.pickup_date)}</div>
-                        <div className="text-xs text-slate-500">{order.pickup_time_slot}</div>
+                        <div className="text-xs text-slate-500 hidden sm:block">{order.pickup_time_slot}</div>
                       </div>
                     </td>
                     
-                    <td className="py-4 px-4">
-                      <div className="font-medium text-slate-900">
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
+                      <div className="font-medium text-slate-900 text-sm">
                         ${order.total?.toFixed(2) || '0.00'}
                       </div>
                     </td>
                     
-                    <td className="py-4 px-4">
-                      <button
-                        onClick={() => setSelectedOrder(selectedOrder?.id === order.id ? null : order)}
-                        className="text-purple-600 hover:text-purple-700 font-medium text-sm flex items-center space-x-1"
+                    <td className="py-3 px-2 sm:py-4 sm:px-4">
+                      <TumbleButton
+                        onClick={() => router.push(`/dashboard/orders/${order.id}`)}
+                        variant="ghost"
+                        size="sm"
                       >
                         <Eye className="w-4 h-4" />
-                        <span>View</span>
-                      </button>
+                        <span className="hidden sm:inline">View</span>
+                      </TumbleButton>
                     </td>
                   </tr>
                 )
@@ -475,22 +554,13 @@ export default function AdminOrdersPage() {
       </div>
 
       {/* Order Details Modal */}
-      {selectedOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-slate-900">Order #{selectedOrder.id}</h3>
-                <button 
-                  onClick={() => setSelectedOrder(null)}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  <span className="sr-only">Close</span>
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+      <TumbleDialog open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        {selectedOrder && (
+          <TumbleDialogContent className="max-w-2xl">
+            <TumbleDialogHeader>
+              <TumbleDialogTitle>Order #{selectedOrder.id}</TumbleDialogTitle>
+            </TumbleDialogHeader>
+            <TumbleDialogBody>
 
               {/* Order Details Content */}
               <div className="space-y-6">
@@ -533,28 +603,29 @@ export default function AdminOrdersPage() {
                   <p className="text-2xl font-bold text-slate-900">${selectedOrder.total?.toFixed(2) || '0.00'}</p>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </TumbleDialogBody>
+            <TumbleDialogFooter>
+              <TumbleButton
+                onClick={() => router.push(`/dashboard/orders/${selectedOrder.id}`)}
+                variant="default"
+              >
+                View Full Details
+              </TumbleButton>
+            </TumbleDialogFooter>
+          </TumbleDialogContent>
+        )}
+      </TumbleDialog>
 
       {/* Route Assignment Modal */}
-      {showRouteAssignment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-slate-900">Assign Route</h3>
-                <button 
-                  onClick={() => setShowRouteAssignment(false)}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  <span className="sr-only">Close</span>
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+      <TumbleDialog open={showRouteAssignment} onOpenChange={setShowRouteAssignment}>
+        <TumbleDialogContent className="max-w-md">
+          <TumbleDialogHeader>
+            <TumbleDialogTitle>Assign Route</TumbleDialogTitle>
+            <TumbleDialogDescription>
+              Assign {selectedOrders.size} selected orders to a driver route
+            </TumbleDialogDescription>
+          </TumbleDialogHeader>
+          <TumbleDialogBody>
 
               <div className="space-y-4">
                 <div>
@@ -599,28 +670,232 @@ export default function AdminOrdersPage() {
                   <p className="text-sm text-slate-600">
                     Assigning {selectedOrders.size} orders to this route
                   </p>
+                  {selectedOrders.size > 1 && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      ✨ These orders were optimally grouped for efficiency
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex space-x-3 pt-4">
-                  <button
-                    onClick={() => setShowRouteAssignment(false)}
-                    className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleRouteAssignment}
-                    disabled={!routeAssignment.driver_id}
-                    className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Assign Route
-                  </button>
-                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </TumbleDialogBody>
+            <TumbleDialogFooter>
+              <TumbleButton
+                onClick={() => setShowRouteAssignment(false)}
+                variant="outline"
+              >
+                Cancel
+              </TumbleButton>
+              <TumbleButton
+                onClick={handleRouteAssignment}
+                disabled={!routeAssignment.driver_id}
+                variant="default"
+              >
+                Assign Route
+              </TumbleButton>
+            </TumbleDialogFooter>
+          </TumbleDialogContent>
+      </TumbleDialog>
+
+      {/* Bulk Status Update Modal */}
+      <TumbleDialog open={showBulkStatusUpdate} onOpenChange={setShowBulkStatusUpdate}>
+        <TumbleDialogContent className="max-w-md">
+          <TumbleDialogHeader>
+            <TumbleDialogTitle>Bulk Status Update</TumbleDialogTitle>
+            <TumbleDialogDescription>
+              Update the status of {selectedOrders.size} selected orders simultaneously
+            </TumbleDialogDescription>
+          </TumbleDialogHeader>
+          <TumbleDialogBody>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">New Status</label>
+                  <select 
+                    value={bulkStatusUpdate.status} 
+                    onChange={(e) => setBulkStatusUpdate({...bulkStatusUpdate, status: e.target.value})}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="">Select status</option>
+                    <option value="pending">Pending</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="picked_up">Picked Up</option>
+                    <option value="in_process">In Process</option>
+                    <option value="ready">Ready</option>
+                    <option value="out_for_delivery">Out for Delivery</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Notes (Optional)</label>
+                  <textarea 
+                    value={bulkStatusUpdate.notes}
+                    onChange={(e) => setBulkStatusUpdate({...bulkStatusUpdate, notes: e.target.value})}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    rows={3}
+                    placeholder="Add any notes about this status update..."
+                  />
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-lg">
+                  <p className="text-sm text-slate-600">
+                    Updating {selectedOrders.size} orders to "{bulkStatusUpdate.status}" status
+                  </p>
+                </div>
+
+              </div>
+            </TumbleDialogBody>
+            <TumbleDialogFooter>
+              <TumbleButton
+                onClick={() => setShowBulkStatusUpdate(false)}
+                variant="outline"
+              >
+                Cancel
+              </TumbleButton>
+              <TumbleButton
+                onClick={handleBulkStatusUpdate}
+                disabled={!bulkStatusUpdate.status}
+                variant="default"
+              >
+                Update Status
+              </TumbleButton>
+            </TumbleDialogFooter>
+          </TumbleDialogContent>
+      </TumbleDialog>
+
+      {/* Optimization Suggestions Modal */}
+      <TumbleDialog open={showOptimizationSuggestions && !!optimizationSuggestions} onOpenChange={(open) => !open && setShowOptimizationSuggestions(false)}>
+        {optimizationSuggestions && (
+          <TumbleDialogContent className="max-w-4xl">
+            <TumbleDialogHeader>
+              <TumbleDialogTitle>Route Optimization Suggestions</TumbleDialogTitle>
+              <TumbleDialogDescription>
+                Smart grouping recommendations to create efficient delivery routes
+              </TumbleDialogDescription>
+            </TumbleDialogHeader>
+            <TumbleDialogBody>
+
+              <div className="space-y-6">
+                {/* Summary */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <MapPin className="w-5 h-5 text-blue-600 mr-2" />
+                      <span className="font-medium text-blue-900">
+                        Found {optimizationSuggestions.total_orders} orders ready for route optimization
+                      </span>
+                    </div>
+                    <span className="text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded-full">
+                      Efficiency Analysis
+                    </span>
+                  </div>
+                </div>
+
+                {/* Recommended Route Groups */}
+                <div className="space-y-4">
+                  <h4 className="font-semibold text-slate-900 text-lg">🎯 Recommended Route Groups</h4>
+                  <p className="text-sm text-slate-600 mb-4">
+                    These groupings will minimize travel time and maximize delivery efficiency. Click "Create Route" to assign a group to a driver.
+                  </p>
+                  
+                  {optimizationSuggestions.suggestions.map((suggestion, index) => (
+                    <div key={index} className="border border-slate-200 rounded-xl p-4 bg-gradient-to-r from-slate-50 to-slate-100">
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="font-semibold text-slate-900 capitalize flex items-center">
+                          {suggestion.type === 'pickup_delivery_cycle' && <Route className="w-4 h-4 mr-2 text-purple-600" />}
+                          {suggestion.type === 'geographic_clusters' && <MapPin className="w-4 h-4 mr-2 text-green-600" />}
+                          {suggestion.type === 'time_slot_grouping' && <Clock className="w-4 h-4 mr-2 text-blue-600" />}
+                          {suggestion.type.replaceAll('_', ' ')}
+                        </h5>
+                        <span className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded-full">
+                          {Object.values(suggestion.groups).reduce((acc, curr) => acc + curr.length, 0)} orders
+                        </span>
+                      </div>
+                      <p className="text-slate-600 text-sm mb-4">{suggestion.message}</p>
+                      
+                      <div className="grid gap-3">
+                        {Object.entries(suggestion.groups).map(([group, orderIds]) => (
+                          <div key={group} className="bg-white p-4 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-slate-800">{group}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-slate-500">{orderIds.length} orders</span>
+                                <TumbleButton
+                                  onClick={() => {
+                                    // Auto-select these orders and open route assignment
+                                    setSelectedOrders(new Set(orderIds))
+                                    setShowOptimizationSuggestions(false)
+                                    setShowRouteAssignment(true)
+                                  }}
+                                  variant="outline"
+                                  size="sm"
+                                  className="ml-2"
+                                >
+                                  Create Route
+                                </TumbleButton>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {orderIds.map((orderId) => (
+                                <span key={orderId} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                  #{orderId}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Order Details - Compact View */}
+                <div className="border border-slate-200 rounded-xl">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50">
+                    <h4 className="font-semibold text-slate-900">📋 Order Details</h4>
+                    <p className="text-sm text-slate-600">Full address details for route planning</p>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {optimizationSuggestions.orders.map((order) => (
+                      <div key={order.id} className="p-3 border-b border-slate-100 last:border-b-0 hover:bg-slate-50">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-slate-900">#{order.id}</span>
+                              <span className="text-sm text-slate-600">{order.customer_name}</span>
+                              <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+                                {order.pickup_time_slot}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 space-y-1">
+                              <div>📍 Pickup: {order.pickup_address}, {order.pickup_city} {order.pickup_zip}</div>
+                              <div>🏠 Delivery: {order.delivery_address}, {order.delivery_city} {order.delivery_zip}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </TumbleDialogBody>
+            <TumbleDialogFooter>
+              <div className="text-sm text-slate-600 mr-auto">
+                💡 Tip: Use "Create Route" buttons above to quickly assign optimized groups to drivers
+              </div>
+              <TumbleButton
+                onClick={() => setShowOptimizationSuggestions(false)}
+                variant="outline"
+              >
+                Close
+              </TumbleButton>
+            </TumbleDialogFooter>
+          </TumbleDialogContent>
+        )}
+      </TumbleDialog>
     </>
   )
 }

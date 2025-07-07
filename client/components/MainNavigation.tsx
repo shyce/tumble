@@ -38,7 +38,7 @@ export default function MainNavigation() {
   const navRef = useRef<HTMLDivElement>(null)
 
   const handleSignOut = async () => {
-    await signOut({ redirect: true, callbackUrl: '/' })
+    await signOut({ redirect: true, callbackUrl: '/auth/signin' })
   }
 
   // Close dropdown when clicking outside

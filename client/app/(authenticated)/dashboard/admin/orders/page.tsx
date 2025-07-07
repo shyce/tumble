@@ -21,7 +21,7 @@ import {
   Phone,
   Mail
 } from 'lucide-react'
-import { adminApi, AdminOrder, User as UserType, DriverStats, RouteAssignmentRequest, BulkStatusUpdateRequest, OptimizationSuggestionsRequest, OptimizationSuggestionsResponse, statusConfig, OrderStatus } from '@/lib/api'
+import { adminApi, AdminOrder, User as UserType, DriverStats, RouteAssignmentRequest, BulkStatusUpdateRequest, OptimizationSuggestionsRequest, OptimizationSuggestionsResponse, statusConfig, OrderStatus, CreateOrderResolutionRequest } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
 import { TumbleButton } from '@/components/ui/tumble-button'
 import { TumbleIconButton } from '@/components/ui/tumble-icon-button'
@@ -58,6 +58,8 @@ export default function AdminOrdersPage() {
   const [showRouteAssignment, setShowRouteAssignment] = useState(false)
   const [showBulkStatusUpdate, setShowBulkStatusUpdate] = useState(false)
   const [showOptimizationSuggestions, setShowOptimizationSuggestions] = useState(false)
+  const [showFailedOrderResolution, setShowFailedOrderResolution] = useState(false)
+  const [failedOrderToResolve, setFailedOrderToResolve] = useState<AdminOrder | null>(null)
   const [routeAssignment, setRouteAssignment] = useState({
     driver_id: 0,
     route_date: new Date().toISOString().split('T')[0],
@@ -68,6 +70,12 @@ export default function AdminOrdersPage() {
     notes: ''
   })
   const [optimizationSuggestions, setOptimizationSuggestions] = useState<OptimizationSuggestionsResponse | null>(null)
+  const [failedOrderResolution, setFailedOrderResolution] = useState({
+    resolution_type: '',
+    reschedule_date: new Date().toISOString().split('T')[0],
+    refund_amount: 0,
+    notes: ''
+  })
 
   const loadData = useCallback(async () => {
     if (!session) return
@@ -303,6 +311,7 @@ export default function AdminOrdersPage() {
                 <option value="ready">Ready</option>
                 <option value="out_for_delivery">Out for Delivery</option>
                 <option value="delivered">Delivered</option>
+                <option value="failed">Failed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
@@ -383,7 +392,7 @@ export default function AdminOrdersPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-white rounded-xl p-4 shadow-lg">
           <div className="flex items-center justify-between">
             <div>
@@ -425,6 +434,18 @@ export default function AdminOrdersPage() {
               </p>
             </div>
             <CheckCircle className="w-8 h-8 text-green-500" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">Failed</p>
+              <p className="text-2xl font-bold text-red-600">
+                {filteredOrders.filter(o => o.status === 'failed').length}
+              </p>
+            </div>
+            <AlertCircle className="w-8 h-8 text-red-500" />
           </div>
         </div>
       </div>
@@ -536,14 +557,29 @@ export default function AdminOrdersPage() {
                     </td>
                     
                     <td className="py-3 px-2 sm:py-4 sm:px-4">
-                      <TumbleButton
-                        onClick={() => router.push(`/dashboard/orders/${order.id}`)}
-                        variant="ghost"
-                        size="sm"
-                      >
-                        <Eye className="w-4 h-4" />
-                        <span className="hidden sm:inline">View</span>
-                      </TumbleButton>
+                      <div className="flex items-center gap-2">
+                        <TumbleButton
+                          onClick={() => router.push(`/dashboard/orders/${order.id}`)}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span className="hidden sm:inline">View</span>
+                        </TumbleButton>
+                        {order.status === 'failed' && (
+                          <TumbleButton
+                            onClick={() => {
+                              setFailedOrderToResolve(order)
+                              setShowFailedOrderResolution(true)
+                            }}
+                            variant="destructive"
+                            size="sm"
+                          >
+                            <AlertCircle className="w-4 h-4" />
+                            <span className="hidden sm:inline">Resolve</span>
+                          </TumbleButton>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -724,6 +760,7 @@ export default function AdminOrdersPage() {
                     <option value="ready">Ready</option>
                     <option value="out_for_delivery">Out for Delivery</option>
                     <option value="delivered">Delivered</option>
+                    <option value="failed">Failed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
                 </div>
@@ -891,6 +928,194 @@ export default function AdminOrdersPage() {
                 variant="outline"
               >
                 Close
+              </TumbleButton>
+            </TumbleDialogFooter>
+          </TumbleDialogContent>
+        )}
+      </TumbleDialog>
+
+      {/* Failed Order Resolution Modal */}
+      <TumbleDialog open={showFailedOrderResolution && !!failedOrderToResolve} onOpenChange={(open) => {
+        if (!open) {
+          setShowFailedOrderResolution(false)
+          setFailedOrderToResolve(null)
+          setFailedOrderResolution({
+            resolution_type: '',
+            reschedule_date: new Date().toISOString().split('T')[0],
+            refund_amount: 0,
+            notes: ''
+          })
+        }
+      }}>
+        {failedOrderToResolve && (
+          <TumbleDialogContent className="max-w-2xl">
+            <TumbleDialogHeader>
+              <TumbleDialogTitle>Resolve Failed Order #{failedOrderToResolve.id}</TumbleDialogTitle>
+              <TumbleDialogDescription>
+                Handle the failed pickup/delivery for {failedOrderToResolve.user_name}
+              </TumbleDialogDescription>
+            </TumbleDialogHeader>
+            <TumbleDialogBody>
+              <div className="space-y-6">
+                {/* Order Details */}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-start space-x-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-red-900">Failed Order Details</h4>
+                      <p className="text-sm text-red-700 mt-1">
+                        Customer: {failedOrderToResolve.user_name} ({failedOrderToResolve.user_email})
+                      </p>
+                      <p className="text-sm text-red-700">
+                        Original Date: {formatDate(failedOrderToResolve.pickup_date)} - {failedOrderToResolve.pickup_time_slot}
+                      </p>
+                      <p className="text-sm text-red-700">
+                        Total Amount: ${failedOrderToResolve.total?.toFixed(2) || '0.00'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resolution Type */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Resolution Type</label>
+                  <select 
+                    value={failedOrderResolution.resolution_type} 
+                    onChange={(e) => setFailedOrderResolution({...failedOrderResolution, resolution_type: e.target.value})}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="">Select resolution type</option>
+                    <option value="reschedule">Reschedule Pickup/Delivery</option>
+                    <option value="partial_refund">Issue Partial Refund</option>
+                    <option value="full_refund">Issue Full Refund</option>
+                    <option value="credit">Apply Account Credit</option>
+                    <option value="waive_fee">Waive Service Fee</option>
+                  </select>
+                </div>
+
+                {/* Conditional Fields Based on Resolution Type */}
+                {failedOrderResolution.resolution_type === 'reschedule' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">New Pickup Date</label>
+                    <input 
+                      type="date" 
+                      value={failedOrderResolution.reschedule_date}
+                      onChange={(e) => setFailedOrderResolution({...failedOrderResolution, reschedule_date: e.target.value})}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+                )}
+
+                {(failedOrderResolution.resolution_type === 'partial_refund' || 
+                  failedOrderResolution.resolution_type === 'credit') && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      {failedOrderResolution.resolution_type === 'partial_refund' ? 'Refund Amount' : 'Credit Amount'}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500">$</span>
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        value={failedOrderResolution.refund_amount}
+                        onChange={(e) => setFailedOrderResolution({...failedOrderResolution, refund_amount: parseFloat(e.target.value) || 0})}
+                        className="w-full border border-slate-300 rounded-lg pl-8 pr-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Resolution Notes */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Resolution Notes</label>
+                  <textarea 
+                    value={failedOrderResolution.notes}
+                    onChange={(e) => setFailedOrderResolution({...failedOrderResolution, notes: e.target.value})}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    rows={4}
+                    placeholder="Explain the resolution and any communication with the customer..."
+                  />
+                </div>
+
+                {/* Customer Communication Template */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-blue-900 mb-2 flex items-center">
+                    <Mail className="w-4 h-4 mr-2" />
+                    Suggested Customer Message
+                  </h4>
+                  <p className="text-sm text-blue-800 whitespace-pre-line">
+                    {failedOrderResolution.resolution_type === 'reschedule' && 
+                      `Dear ${failedOrderToResolve.user_name},\n\nWe apologize for the inconvenience with your recent order. We've rescheduled your pickup for ${new Date(failedOrderResolution.reschedule_date).toLocaleDateString()}.\n\nOur team will ensure priority service for your rescheduled pickup.\n\nThank you for your understanding.`
+                    }
+                    {failedOrderResolution.resolution_type === 'partial_refund' && 
+                      `Dear ${failedOrderToResolve.user_name},\n\nWe apologize for the issue with your recent order. We've processed a partial refund of $${failedOrderResolution.refund_amount.toFixed(2)} to your account.\n\nThe refund should appear within 3-5 business days.\n\nThank you for your patience.`
+                    }
+                    {failedOrderResolution.resolution_type === 'full_refund' && 
+                      `Dear ${failedOrderToResolve.user_name},\n\nWe sincerely apologize for the failed service. We've issued a full refund of $${failedOrderToResolve.total?.toFixed(2) || '0.00'} to your account.\n\nThe refund should appear within 3-5 business days.\n\nWe hope to serve you better in the future.`
+                    }
+                    {!failedOrderResolution.resolution_type && 'Select a resolution type to see suggested message'}
+                  </p>
+                </div>
+              </div>
+            </TumbleDialogBody>
+            <TumbleDialogFooter>
+              <TumbleButton
+                onClick={() => {
+                  setShowFailedOrderResolution(false)
+                  setFailedOrderToResolve(null)
+                }}
+                variant="outline"
+              >
+                Cancel
+              </TumbleButton>
+              <TumbleButton
+                onClick={async () => {
+                  if (!session || !failedOrderResolution.resolution_type) return
+                  
+                  setError(null)
+                  setSuccessMessage(null)
+                  
+                  try {
+                    const request: CreateOrderResolutionRequest = {
+                      order_id: failedOrderToResolve.id,
+                      resolution_type: failedOrderResolution.resolution_type as any,
+                      notes: failedOrderResolution.notes
+                    }
+                    
+                    // Add conditional fields based on resolution type
+                    if (failedOrderResolution.resolution_type === 'reschedule') {
+                      request.reschedule_date = failedOrderResolution.reschedule_date
+                    } else if (failedOrderResolution.resolution_type === 'partial_refund') {
+                      request.refund_amount = failedOrderResolution.refund_amount
+                    } else if (failedOrderResolution.resolution_type === 'full_refund') {
+                      request.refund_amount = failedOrderToResolve.total || 0
+                    } else if (failedOrderResolution.resolution_type === 'credit') {
+                      request.credit_amount = failedOrderResolution.refund_amount
+                    }
+                    
+                    await adminApi.createOrderResolution(session, request)
+                    
+                    setSuccessMessage(`Order #${failedOrderToResolve.id} has been resolved with ${failedOrderResolution.resolution_type.replace('_', ' ')}`)
+                    setShowFailedOrderResolution(false)
+                    setFailedOrderToResolve(null)
+                    setFailedOrderResolution({
+                      resolution_type: '',
+                      reschedule_date: new Date().toISOString().split('T')[0],
+                      refund_amount: 0,
+                      notes: ''
+                    })
+                    
+                    // Reload data to reflect changes
+                    await loadData()
+                  } catch (err) {
+                    console.error('Error resolving order:', err)
+                    setError('Failed to resolve order. Please try again.')
+                  }
+                }}
+                disabled={!failedOrderResolution.resolution_type || !failedOrderResolution.notes}
+                variant="default"
+              >
+                Apply Resolution
               </TumbleButton>
             </TumbleDialogFooter>
           </TumbleDialogContent>

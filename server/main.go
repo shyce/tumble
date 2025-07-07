@@ -157,6 +157,8 @@ func main() {
 	api.HandleFunc("/admin/routes/assign", server.admin.requireAdmin(server.admin.handleAssignDriverToRoute))
 	api.HandleFunc("/admin/orders/bulk-status", server.admin.requireAdmin(server.admin.handleBulkOrderStatusUpdate))
 	api.HandleFunc("/admin/routes/optimization-suggestions", server.admin.requireAdmin(server.admin.handleGetRouteOptimizationSuggestions))
+	api.HandleFunc("/admin/orders/resolution", server.admin.requireAdmin(server.admin.handleCreateOrderResolution)).Methods("POST")
+	api.HandleFunc("/admin/orders/{orderId}/resolutions", server.admin.requireAdmin(server.admin.handleGetOrderResolutions)).Methods("GET")
 
 	// Payment routes
 	api.HandleFunc("/payments/setup-intent", server.payments.handleCreateSetupIntent)

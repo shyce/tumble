@@ -72,7 +72,7 @@ export default function DriverEarningsPage() {
         day.orders.toString(),
         `$${day.earnings.toFixed(2)}`,
         day.hours.toFixed(1),
-        `$${(day.earnings / day.hours).toFixed(2)}`
+        `$${day.hours > 0 ? (day.earnings / day.hours).toFixed(2) : '0.00'}`
       ])
     ].map(row => row.join(',')).join('\n')
     
@@ -281,7 +281,7 @@ export default function DriverEarningsPage() {
                     {day.hours}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    ${(day.earnings / day.hours).toFixed(2)}/hr
+                    ${day.hours > 0 ? (day.earnings / day.hours).toFixed(2) : '0.00'}/hr
                   </td>
                 </tr>
               ))}

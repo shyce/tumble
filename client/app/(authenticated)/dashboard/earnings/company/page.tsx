@@ -229,7 +229,9 @@ export default function CompanyEarningsPage() {
             <TrendingUp className="w-8 h-8 text-purple-600" />
           </div>
           <p className="text-3xl font-bold text-gray-900">${earnings.thisMonthRevenue.toFixed(2)}</p>
-          <p className="text-sm text-green-600 mt-1">+{earnings.monthlyGrowth}% growth</p>
+          <p className={`text-sm mt-1 ${earnings.monthlyGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {earnings.monthlyGrowth >= 0 ? '+' : ''}{Math.max(-99.9, Math.min(999.9, earnings.monthlyGrowth)).toFixed(1)}% growth
+          </p>
         </div>
 
         {/* Total Revenue */}
@@ -277,7 +279,9 @@ export default function CompanyEarningsPage() {
             <h3 className="text-lg font-semibold text-gray-900">Growth</h3>
             <TrendingUp className="w-8 h-8 text-purple-600" />
           </div>
-          <p className="text-3xl font-bold text-gray-900">{earnings.monthlyGrowth}%</p>
+          <p className={`text-3xl font-bold ${earnings.monthlyGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {earnings.monthlyGrowth >= 0 ? '+' : ''}{Math.max(-99.9, Math.min(999.9, earnings.monthlyGrowth)).toFixed(1)}%
+          </p>
           <p className="text-sm text-gray-500 mt-1">Monthly growth</p>
         </div>
       </div>

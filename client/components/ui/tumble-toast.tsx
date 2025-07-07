@@ -14,6 +14,7 @@ const TumbleToaster = ({ ...props }: ToasterProps) => {
       expand={true}
       richColors={false}
       closeButton={false}
+      offset={80}
       toastOptions={{
         className: "group toast group-[.toaster]:bg-white group-[.toaster]:text-slate-900 group-[.toaster]:border-slate-200 group-[.toaster]:shadow-lg group-[.toaster]:rounded-xl group-[.toaster]:border",
         descriptionClassName: "group-[.toast]:text-slate-600",

@@ -68,7 +68,7 @@
 - [x] **Role-based action cards** with appropriate icons and navigation
 - [x] **FULLY removed separate /driver and /admin routes** - everything under /dashboard
 - [x] **Fixed all API routes to use /api/v1/ consistently**
-- [x] **Subscription plans API working** (192.168.0.201:3005/api/v1/subscriptions/plans)
+- [x] **Subscription plans API working** (/api/v1/subscriptions/plans)
 - [x] **Driver application form functional** (/apply-driver)
 - [x] **Moved admin pages to /dashboard structure** (driver-applications, users, analytics, etc)
 - [x] **Removed AdminNavigation component** - no special admin navigation needed

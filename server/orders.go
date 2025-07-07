@@ -389,14 +389,24 @@ func (h *OrderHandler) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build query
+	// Build query with calculated totals from order_items
 	query := `
-		SELECT id, user_id, subscription_id, pickup_address_id, delivery_address_id,
-			   status, total_weight, subtotal, tax, total, special_instructions,
-			   pickup_date, delivery_date, pickup_time_slot, delivery_time_slot,
-			   created_at, updated_at
-		FROM orders
-		WHERE user_id = $1`
+		SELECT 
+			o.id, o.user_id, o.subscription_id, o.pickup_address_id, o.delivery_address_id,
+			o.status, o.total_weight, 
+			COALESCE(oi_totals.subtotal, 0) as subtotal,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 0.08, 2) as tax,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 1.08, 2) as total,
+			o.special_instructions,
+			o.pickup_date, o.delivery_date, o.pickup_time_slot, o.delivery_time_slot,
+			o.created_at, o.updated_at
+		FROM orders o
+		LEFT JOIN (
+			SELECT order_id, SUM(price * quantity) as subtotal
+			FROM order_items
+			GROUP BY order_id
+		) oi_totals ON o.id = oi_totals.order_id
+		WHERE o.user_id = $1`
 	
 	args := []interface{}{userID}
 	argCount := 1

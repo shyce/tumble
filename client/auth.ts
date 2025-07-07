@@ -15,7 +15,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
 
         try {
-          const response = await fetch(`http://192.168.0.201:3005/api/v1/auth/login`, {
+          const response = await fetch(`https://tumble.royer.app/api/v1/auth/login`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

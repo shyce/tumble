@@ -124,7 +124,7 @@ export default function UsersManagementPage() {
 
   const updateUserStatus = async (userId: number, newStatus: User['status']) => {
     try {
-      const response = await fetch(`http://192.168.0.201:3005/api/v1/admin/users/${userId}/status`, {
+      const response = await fetch(`/api/v1/admin/users/${userId}/status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

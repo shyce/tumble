@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Sparkles, Crown, Truck, User } from 'lucide-react'
 import PageHeader from '@/components/PageHeader'
 import { TumbleInput } from '@/components/ui/tumble-input'
 import { TumbleButton } from '@/components/ui/tumble-button'
@@ -43,11 +44,36 @@ export default function SignIn() {
     signIn('google', { callbackUrl: '/dashboard' })
   }
 
+  const handleTestAccountLogin = async (email: string, password: string) => {
+    setLoading(true)
+    try {
+      const result = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        tumbleToast.error('Sign in failed', result.code as string)
+      } else {
+        tumbleToast.success('Welcome back!', 'You have been signed in successfully.')
+        router.push('/dashboard')
+      }
+    } catch (error: any) {
+      tumbleToast.error('Sign in failed', 'An unexpected error occurred. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
-    <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
+    <div className="min-h-screen bg-slate-50 py-6 px-4 sm:px-6 lg:py-12 lg:px-8 overflow-x-hidden">
+      <div className="max-w-6xl mx-auto w-full">
+        <div className="flex flex-col lg:grid lg:grid-cols-2 gap-8 lg:gap-12 lg:items-center w-full">
+          {/* Sign In Form */}
+          <div className="max-w-md mx-auto w-full space-y-6 lg:space-y-8 min-w-0">
         <PageHeader title="Sign In" subtitle="Your laundry service awaits" compact={true} />
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        <form className="mt-6 lg:mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <TumbleInput
               id="email"
@@ -131,7 +157,120 @@ export default function SignIn() {
               </Link>
             </span>
           </div>
-        </form>
+          </form>
+          </div>
+
+          {/* Welcome Section */}
+          <div className="bg-white rounded-3xl p-6 lg:p-8 shadow-2xl border border-slate-200 w-full max-w-md mx-auto lg:max-w-none min-w-0">
+            <div className="text-center mb-4 lg:mb-6">
+              <div className="inline-flex items-center justify-center w-12 h-12 lg:w-16 lg:h-16 bg-teal-100 rounded-full mb-2 lg:mb-3">
+                <Sparkles className="w-6 h-6 lg:w-8 lg:h-8 text-teal-600" />
+              </div>
+              <h2 className="text-xl lg:text-2xl font-bold text-slate-800 mb-1">Welcome to Tumble</h2>
+              <p className="text-slate-600 text-xs lg:text-sm">Premium laundry service platform</p>
+            </div>
+            
+            {/* Test Accounts */}
+            <div className="space-y-3 lg:space-y-4 mb-4 lg:mb-6">
+              <h3 className="text-base lg:text-lg font-semibold text-slate-800 text-center mb-2 lg:mb-3">Test Accounts</h3>
+              <div className="space-y-3">
+                <TumbleButton 
+                  onClick={() => handleTestAccountLogin('admin@tumble.com', 'admin123')}
+                  disabled={loading}
+                  variant="outline"
+                  className="w-full h-auto p-3 lg:p-4 text-left border-purple-200 hover:border-purple-300 hover:bg-purple-50/50"
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <div className="flex items-center gap-2 lg:gap-3">
+                      <div className="w-8 h-8 lg:w-10 lg:h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                        <Crown className="w-4 h-4 lg:w-5 lg:h-5 text-purple-600" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm lg:text-base font-semibold text-purple-800">Admin</div>
+                        <div className="text-xs lg:text-sm text-purple-600">Manage everything</div>
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-slate-500 flex-shrink-0">
+                      <div className="font-mono hidden sm:block">admin@tumble.com</div>
+                      <div className="font-mono hidden sm:block">admin123</div>
+                      <div className="font-mono sm:hidden">admin</div>
+                    </div>
+                  </div>
+                </TumbleButton>
+                <TumbleButton 
+                  onClick={() => handleTestAccountLogin('driver@tumble.com', 'driver123')}
+                  disabled={loading}
+                  variant="outline"
+                  className="w-full h-auto p-3 lg:p-4 text-left border-blue-200 hover:border-blue-300 hover:bg-blue-50/50"
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <div className="flex items-center gap-2 lg:gap-3">
+                      <div className="w-8 h-8 lg:w-10 lg:h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Truck className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm lg:text-base font-semibold text-blue-800">Driver</div>
+                        <div className="text-xs lg:text-sm text-blue-600">Routes & earnings</div>
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-slate-500 flex-shrink-0">
+                      <div className="font-mono hidden sm:block">driver@tumble.com</div>
+                      <div className="font-mono hidden sm:block">driver123</div>
+                      <div className="font-mono sm:hidden">driver</div>
+                    </div>
+                  </div>
+                </TumbleButton>
+                <TumbleButton 
+                  onClick={() => handleTestAccountLogin('customer@tumble.com', 'customer123')}
+                  disabled={loading}
+                  variant="outline"
+                  className="w-full h-auto p-3 lg:p-4 text-left border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50/50"
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <div className="flex items-center gap-2 lg:gap-3">
+                      <div className="w-8 h-8 lg:w-10 lg:h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                        <User className="w-4 h-4 lg:w-5 lg:h-5 text-emerald-600" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-sm lg:text-base font-semibold text-emerald-800">Customer</div>
+                        <div className="text-xs lg:text-sm text-emerald-600">Orders & subscriptions</div>
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-slate-500 flex-shrink-0">
+                      <div className="font-mono hidden sm:block">customer@tumble.com</div>
+                      <div className="font-mono hidden sm:block">customer123</div>
+                      <div className="font-mono sm:hidden">customer</div>
+                    </div>
+                  </div>
+                </TumbleButton>
+              </div>
+            </div>
+
+            {/* Welcome Letter */}
+            <div className="border-t border-slate-200 pt-6">
+              <div className="text-center mb-4">
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">Hey Lyndsay and Micheal!</h3>
+              </div>
+              
+              <div className="text-slate-600 text-sm leading-relaxed space-y-3">
+                <p>
+                  Hey Lyndsay and Micheal! Welcome to your new laundry service platform. 
+                  Everything here is fully customizable - feel free to adjust anything to fit your vision.
+                </p>
+                
+                <p>
+                  This is just the beginning! Coming soon: automated route optimization, smart driver assignments, 
+                  real-time tracking, advanced analytics, and mobile apps for drivers and customers.
+                </p>
+                
+                <div className="text-center mt-4 pt-3 border-t border-slate-100">
+                  <p className="text-teal-600 font-medium">You've got this! 💚</p>
+                  <p className="text-xs text-slate-500 mt-1">Love, Brian</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -86,21 +86,23 @@ func (h *DriverRouteHandler) handleGetDriverRoutes(w http.ResponseWriter, r *htt
 	var rows *sql.Rows
 	
 	if date == "" {
-		// If no date specified, show all upcoming routes (today and future)
+		// If no date specified, show all upcoming routes (today and future) that have orders
 		query = `
-			SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
-			FROM driver_routes
-			WHERE driver_id = $1 AND DATE(route_date) >= CURRENT_DATE
-			ORDER BY route_date ASC, created_at ASC
+			SELECT DISTINCT dr.id, dr.driver_id, dr.route_date, dr.route_type, dr.status, dr.created_at, dr.created_at as updated_at
+			FROM driver_routes dr
+			INNER JOIN route_orders ro ON dr.id = ro.route_id
+			WHERE dr.driver_id = $1 AND DATE(dr.route_date) >= CURRENT_DATE
+			ORDER BY dr.route_date ASC, dr.created_at ASC
 		`
 		rows, err = h.db.Query(query, driverID)
 	} else {
-		// If date specified, show routes for that specific date
+		// If date specified, show routes for that specific date that have orders
 		query = `
-			SELECT id, driver_id, route_date, route_type, status, created_at, created_at as updated_at
-			FROM driver_routes
-			WHERE driver_id = $1 AND DATE(route_date) = $2
-			ORDER BY created_at ASC
+			SELECT DISTINCT dr.id, dr.driver_id, dr.route_date, dr.route_type, dr.status, dr.created_at, dr.created_at as updated_at
+			FROM driver_routes dr
+			INNER JOIN route_orders ro ON dr.id = ro.route_id
+			WHERE dr.driver_id = $1 AND DATE(dr.route_date) = $2
+			ORDER BY dr.created_at ASC
 		`
 		rows, err = h.db.Query(query, driverID, date)
 	}
@@ -261,8 +263,8 @@ func (h *DriverRouteHandler) handleUpdateRouteOrderStatus(w http.ResponseWriter,
 		return
 	}
 
-	// If completed, also update the main order status
-	if req.Status == "completed" {
+	// If completed or failed, also update the main order status
+	if req.Status == "completed" || req.Status == "failed" {
 		var orderID int
 		var routeType string
 		err = tx.QueryRow(`
@@ -274,13 +276,15 @@ func (h *DriverRouteHandler) handleUpdateRouteOrderStatus(w http.ResponseWriter,
 
 		if err == nil {
 			var newOrderStatus string
-			if routeType == "pickup" {
+			if req.Status == "failed" {
+				newOrderStatus = "failed"
+			} else if routeType == "pickup" {
 				newOrderStatus = "picked_up"
 			} else {
 				newOrderStatus = "delivered"
 			}
 
-			_, err = tx.Exec("UPDATE orders SET status = $1 WHERE id = $2", newOrderStatus, orderID)
+			_, err = tx.Exec("UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", newOrderStatus, orderID)
 			if err != nil {
 				http.Error(w, "Failed to update order status", http.StatusInternalServerError)
 				return
@@ -292,8 +296,12 @@ func (h *DriverRouteHandler) handleUpdateRouteOrderStatus(w http.ResponseWriter,
 				var orderUserID int
 				err = tx.QueryRow("SELECT user_id FROM orders WHERE id = $1", orderID).Scan(&orderUserID)
 				if err == nil {
+					statusMessage := fmt.Sprintf("Order status updated to %s", newOrderStatus)
+					if req.Status == "failed" {
+						statusMessage = "Pickup/delivery failed - our team will contact you to resolve this issue"
+					}
 					h.realtime.PublishOrderUpdate(orderUserID, orderID, newOrderStatus, 
-						fmt.Sprintf("Order status updated to %s", newOrderStatus), nil)
+						statusMessage, nil)
 				}
 			}
 		}

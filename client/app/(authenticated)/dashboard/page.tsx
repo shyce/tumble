@@ -1076,17 +1076,20 @@ export default function Dashboard() {
                             if (isOrderActivity && activity.orderId) {
                               const statusInfo = statusConfig[activity.status as OrderStatus] || statusConfig.pending
                               const StatusIcon = statusInfo.icon
+                              const isFailed = activity.status === 'failed'
                               
                               return (
                                 <Link key={index} href={`/dashboard/orders/${activity.orderId}`}>
-                                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                                  <div className={`flex items-center justify-between p-3 rounded-lg transition-colors cursor-pointer ${
+                                    isFailed ? 'bg-red-50 hover:bg-red-100 ring-1 ring-red-200' : 'bg-slate-50 hover:bg-slate-100'
+                                  }`}>
                                     <div className="flex items-center space-x-3">
                                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${statusInfo.color.replace('text-', 'bg-').replace('-800', '-100').replace('-700', '-100')}`}>
                                         <StatusIcon className={`w-5 h-5 ${statusInfo.color.replace('bg-', 'text-').replace('-100', '-600')}`} />
                                       </div>
                                       <div>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                          Order #{activity.orderId}
+                                        <p className={`text-sm font-semibold ${isFailed ? 'text-red-900' : 'text-slate-900'}`}>
+                                          Order #{activity.orderId} {isFailed && '- Requires Attention'}
                                         </p>
                                         <p className="text-xs text-slate-500">
                                           {activity.customerName} • {new Date(activity.timestamp).toLocaleDateString()}

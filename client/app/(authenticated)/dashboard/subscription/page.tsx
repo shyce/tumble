@@ -10,6 +10,7 @@ import {
   Subscription, 
   SubscriptionPreferences, 
   CreateSubscriptionPreferencesRequest,
+  SubscriptionUsage,
   subscriptionApi,
   addressApi,
   serviceApi,
@@ -23,6 +24,7 @@ export default function SubscriptionPage() {
   const { data: session, status } = useSession()
   const [plans, setPlans] = useState<SubscriptionPlan[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null)
+  const [subscriptionUsage, setSubscriptionUsage] = useState<SubscriptionUsage | null>(null)
   const [loading, setLoading] = useState(false)
   const [plansLoading, setPlansLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,14 +53,17 @@ export default function SubscriptionPage() {
           throw new Error('Failed to fetch subscription plans')
         }
         
-        // Then try to load current subscription if user is logged in
+        // Then try to load current subscription and usage if user is logged in
         if (session?.user) {
           try {
-            const subResponse = await fetch('/api/v1/subscriptions/current', {
-              headers: {
-                'Authorization': `Bearer ${(session as any)?.accessToken}`,
-              },
-            })
+            const [subResponse, usageData] = await Promise.all([
+              fetch('/api/v1/subscriptions/current', {
+                headers: {
+                  'Authorization': `Bearer ${(session as any)?.accessToken}`,
+                },
+              }),
+              subscriptionApi.getSubscriptionUsage(session)
+            ])
             
             if (subResponse.ok) {
               const currentSub = await subResponse.json()
@@ -69,10 +74,13 @@ export default function SubscriptionPage() {
             } else {
               console.log('Error fetching current subscription:', subResponse.status)
             }
+            
+            setSubscriptionUsage(usageData)
           } catch (subError) {
             // It's okay if there's no current subscription, just log it
             console.log('No current subscription found:', subError)
             setCurrentSubscription(null)
+            setSubscriptionUsage(null)
           }
         }
       } catch (err) {
@@ -360,7 +368,14 @@ export default function SubscriptionPage() {
                 month: 'long', 
                 day: 'numeric' 
               })}</p>
-              <p><strong>Usage:</strong> {currentSubscription.pickups_used_this_period} of {currentSubscription.plan?.pickups_per_month} pickups used this period</p>
+              {subscriptionUsage ? (
+                <div className="flex space-x-6 mt-2">
+                  <p><strong>Pickups:</strong> {subscriptionUsage.pickups_used} of {subscriptionUsage.pickups_allowed} used this period</p>
+                  <p><strong>Bags:</strong> {subscriptionUsage.bags_used} of {subscriptionUsage.bags_allowed} used this period</p>
+                </div>
+              ) : (
+                <p><strong>Usage:</strong> {currentSubscription.pickups_used_this_period} of {currentSubscription.plan?.pickups_per_month} pickups used this period</p>
+              )}
             </div>
           </div>
         )}

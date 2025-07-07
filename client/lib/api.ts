@@ -25,6 +25,7 @@ export const statusConfig: Record<string, OrderStatus> = {
   ready: { color: 'bg-purple-100 text-purple-800', icon: CheckCircle, label: 'Ready' },
   out_for_delivery: { color: 'bg-indigo-100 text-indigo-800', icon: Truck, label: 'Out for Delivery' },
   delivered: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Delivered' },
+  failed: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Failed' },
   cancelled: { color: 'bg-red-100 text-red-800', icon: AlertCircle, label: 'Cancelled' }
 }
 
@@ -657,6 +658,27 @@ export interface OptimizationSuggestionsResponse {
   total_orders: number
 }
 
+export interface OrderResolution {
+  id: number
+  order_id: number
+  resolved_by: number
+  resolution_type: 'reschedule' | 'partial_refund' | 'full_refund' | 'credit' | 'waive_fee'
+  reschedule_date?: string
+  refund_amount?: number
+  credit_amount?: number
+  notes: string
+  created_at: string
+}
+
+export interface CreateOrderResolutionRequest {
+  order_id: number
+  resolution_type: 'reschedule' | 'partial_refund' | 'full_refund' | 'credit' | 'waive_fee'
+  reschedule_date?: string
+  refund_amount?: number
+  credit_amount?: number
+  notes: string
+}
+
 export interface DriverStats {
   driver_id: number
   driver_name: string
@@ -836,6 +858,31 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify(request),
     })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async createOrderResolution(session: any, request: CreateOrderResolutionRequest): Promise<OrderResolution> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/resolution`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+
+    return response.json()
+  },
+
+  async getOrderResolutions(session: any, orderId: number): Promise<OrderResolution[]> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/admin/orders/${orderId}/resolutions`)
 
     if (!response.ok) {
       const errorText = await response.text()

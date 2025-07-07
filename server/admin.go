@@ -714,21 +714,40 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 	}
 
 	query := `
-		SELECT 
+		SELECT DISTINCT ON (o.id)
 			o.id, o.user_id, o.subscription_id, o.pickup_address_id, o.delivery_address_id,
-			o.status, o.total_weight, o.subtotal, o.tax, o.total, o.special_instructions,
+			o.status, o.total_weight, 
+			COALESCE(oi_totals.subtotal, 0) as subtotal,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 0.08, 2) as tax,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 1.08, 2) as total,
+			o.special_instructions,
 			o.pickup_date, o.delivery_date, o.pickup_time_slot, o.delivery_time_slot,
 			o.created_at, o.updated_at,
 			u.email, u.first_name, u.last_name,
-			dr.id as route_id, dr.route_type, 
-			CASE WHEN du.first_name IS NOT NULL THEN du.first_name || ' ' || du.last_name ELSE NULL END as driver_name,
-			du.id as driver_id,
-			CASE WHEN ro.id IS NOT NULL THEN true ELSE false END as is_assigned
+			COALESCE(latest_route.route_id, 0) as route_id, 
+			latest_route.route_type, 
+			latest_route.driver_name,
+			COALESCE(latest_route.driver_id, 0) as driver_id,
+			CASE WHEN latest_route.route_id IS NOT NULL THEN true ELSE false END as is_assigned
 		FROM orders o
 		JOIN users u ON o.user_id = u.id
-		LEFT JOIN route_orders ro ON o.id = ro.order_id
-		LEFT JOIN driver_routes dr ON ro.route_id = dr.id
-		LEFT JOIN users du ON dr.driver_id = du.id
+		LEFT JOIN (
+			SELECT order_id, SUM(price * quantity) as subtotal
+			FROM order_items
+			GROUP BY order_id
+		) oi_totals ON o.id = oi_totals.order_id
+		LEFT JOIN (
+			SELECT DISTINCT ON (ro.order_id)
+				ro.order_id,
+				dr.id as route_id,
+				dr.route_type,
+				CASE WHEN du.first_name IS NOT NULL THEN du.first_name || ' ' || du.last_name ELSE NULL END as driver_name,
+				du.id as driver_id
+			FROM route_orders ro
+			JOIN driver_routes dr ON ro.route_id = dr.id
+			LEFT JOIN users du ON dr.driver_id = du.id
+			ORDER BY ro.order_id, ro.id DESC
+		) latest_route ON o.id = latest_route.order_id
 		WHERE 1=1`
 
 	args := []interface{}{}
@@ -752,7 +771,7 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 		args = append(args, userID)
 	}
 
-	query += " ORDER BY o.created_at DESC"
+	query += " ORDER BY o.id, o.created_at DESC"
 
 	argCount++
 	query += fmt.Sprintf(" LIMIT $%d", argCount)
@@ -796,6 +815,30 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		o.UserName = firstName + " " + lastName
+
+		// Fetch order items for each order (same as in orders.go)
+		itemRows, err := h.db.Query(`
+			SELECT oi.id, oi.order_id, oi.service_id, s.name, oi.quantity, oi.weight, oi.price, oi.notes
+			FROM order_items oi
+			JOIN services s ON oi.service_id = s.id
+			WHERE oi.order_id = $1`,
+			o.ID,
+		)
+		if err == nil {
+			o.Items = []OrderItem{}
+			for itemRows.Next() {
+				var item OrderItem
+				err := itemRows.Scan(
+					&item.ID, &item.OrderID, &item.ServiceID, &item.ServiceName,
+					&item.Quantity, &item.Weight, &item.Price, &item.Notes,
+				)
+				if err == nil {
+					o.Items = append(o.Items, item)
+				}
+			}
+			itemRows.Close()
+		}
+
 		orders = append(orders, o)
 	}
 
@@ -1223,6 +1266,222 @@ func groupOrdersByPickupDeliveryCycle(orders []OrderLocation) map[string][]int {
 	}
 	
 	return efficientGroups
+}
+
+// OrderResolution types
+type OrderResolution struct {
+	ID             int       `json:"id"`
+	OrderID        int       `json:"order_id"`
+	ResolvedBy     int       `json:"resolved_by"`
+	ResolutionType string    `json:"resolution_type"`
+	RescheduleDate *string   `json:"reschedule_date,omitempty"`
+	RefundAmount   *float64  `json:"refund_amount,omitempty"`
+	CreditAmount   *float64  `json:"credit_amount,omitempty"`
+	Notes          string    `json:"notes"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type CreateOrderResolutionRequest struct {
+	OrderID        int      `json:"order_id"`
+	ResolutionType string   `json:"resolution_type"`
+	RescheduleDate *string  `json:"reschedule_date,omitempty"`
+	RefundAmount   *float64 `json:"refund_amount,omitempty"`
+	CreditAmount   *float64 `json:"credit_amount,omitempty"`
+	Notes          string   `json:"notes"`
+}
+
+// handleCreateOrderResolution creates a resolution for a failed order
+func (h *AdminHandler) handleCreateOrderResolution(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req CreateOrderResolutionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate resolution type
+	validTypes := map[string]bool{
+		"reschedule":     true,
+		"partial_refund": true,
+		"full_refund":    true,
+		"credit":         true,
+		"waive_fee":      true,
+	}
+	if !validTypes[req.ResolutionType] {
+		http.Error(w, "Invalid resolution type", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields based on resolution type
+	if req.ResolutionType == "reschedule" && req.RescheduleDate == nil {
+		http.Error(w, "Reschedule date is required for reschedule resolution", http.StatusBadRequest)
+		return
+	}
+	if (req.ResolutionType == "partial_refund" || req.ResolutionType == "full_refund") && req.RefundAmount == nil {
+		http.Error(w, "Refund amount is required for refund resolution", http.StatusBadRequest)
+		return
+	}
+	if req.ResolutionType == "credit" && req.CreditAmount == nil {
+		http.Error(w, "Credit amount is required for credit resolution", http.StatusBadRequest)
+		return
+	}
+
+	// Begin transaction
+	tx, err := h.db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Verify order exists and is failed
+	var orderStatus string
+	var userEmail string
+	err = tx.QueryRow(`
+		SELECT o.status, u.email
+		FROM orders o
+		JOIN users u ON o.user_id = u.id
+		WHERE o.id = $1
+	`, req.OrderID).Scan(&orderStatus, &userEmail)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Order not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if orderStatus != "failed" {
+		http.Error(w, "Order is not in failed status", http.StatusBadRequest)
+		return
+	}
+
+	// Insert order resolution
+	var resolution OrderResolution
+	err = tx.QueryRow(`
+		INSERT INTO order_resolutions (
+			order_id, resolved_by, resolution_type, 
+			reschedule_date, refund_amount, credit_amount, notes
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, order_id, resolved_by, resolution_type, 
+			reschedule_date, refund_amount, credit_amount, notes, created_at
+	`, req.OrderID, userID, req.ResolutionType,
+		req.RescheduleDate, req.RefundAmount, req.CreditAmount, req.Notes).Scan(
+		&resolution.ID, &resolution.OrderID, &resolution.ResolvedBy,
+		&resolution.ResolutionType, &resolution.RescheduleDate,
+		&resolution.RefundAmount, &resolution.CreditAmount,
+		&resolution.Notes, &resolution.CreatedAt,
+	)
+	if err != nil {
+		http.Error(w, "Failed to create resolution", http.StatusInternalServerError)
+		return
+	}
+
+	// Update order status based on resolution type
+	newStatus := "cancelled" // Default for refunds
+	if req.ResolutionType == "reschedule" {
+		newStatus = "scheduled"
+		// Update pickup date if rescheduling
+		_, err = tx.Exec(`
+			UPDATE orders 
+			SET status = $1, pickup_date = $2, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $3
+		`, newStatus, req.RescheduleDate, req.OrderID)
+	} else {
+		_, err = tx.Exec(`
+			UPDATE orders 
+			SET status = $1, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $2
+		`, newStatus, req.OrderID)
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to update order status", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: Process refunds/credits through payment system
+	// TODO: Send notification to customer
+
+	// Send real-time update
+	if h.realtime != nil {
+		// Get user ID for the order
+		var orderUserID int
+		err = tx.QueryRow("SELECT user_id FROM orders WHERE id = $1", req.OrderID).Scan(&orderUserID)
+		if err == nil {
+			statusMessage := fmt.Sprintf("Order resolution: %s", req.ResolutionType)
+			h.realtime.PublishOrderUpdate(orderUserID, req.OrderID, newStatus, statusMessage, nil)
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resolution)
+}
+
+// handleGetOrderResolutions gets all resolutions for an order
+func (h *AdminHandler) handleGetOrderResolutions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	vars := mux.Vars(r)
+	orderID, err := strconv.Atoi(vars["orderId"])
+	if err != nil {
+		http.Error(w, "Invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		SELECT 
+			r.id, r.order_id, r.resolved_by, r.resolution_type,
+			r.reschedule_date, r.refund_amount, r.credit_amount,
+			r.notes, r.created_at
+		FROM order_resolutions r
+		WHERE r.order_id = $1
+		ORDER BY r.created_at DESC
+	`
+
+	rows, err := h.db.Query(query, orderID)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	resolutions := []OrderResolution{}
+	for rows.Next() {
+		var r OrderResolution
+		err := rows.Scan(
+			&r.ID, &r.OrderID, &r.ResolvedBy, &r.ResolutionType,
+			&r.RescheduleDate, &r.RefundAmount, &r.CreditAmount,
+			&r.Notes, &r.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		resolutions = append(resolutions, r)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resolutions)
 }
 
 // Enhanced function to create geographic clusters considering both pickup and delivery

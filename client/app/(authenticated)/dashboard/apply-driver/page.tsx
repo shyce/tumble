@@ -124,7 +124,6 @@ export default function ApplyDriverPage() {
   return (
     <>
       <PageHeader title="Apply to be a Driver" subtitle="Join our driver network and start earning with Tumble" />
-      <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6">
@@ -292,7 +291,6 @@ export default function ApplyDriverPage() {
             </div>
           </form>
         </div>
-      </div>
     </>
   );
 }

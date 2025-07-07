@@ -202,7 +202,6 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Account Settings" subtitle="Manage your profile and addresses" />
-      <div className="max-w-4xl mx-auto">
 
         {/* Success Message */}
         {saved && (
@@ -483,7 +482,6 @@ export default function SettingsPage() {
             </ChangePasswordModal>
           </div>
         </div>
-      </div>
     </>
   )
 }

@@ -114,7 +114,6 @@ export default function DriverSchedulePage() {
   return (
     <>
       <PageHeader title="My Schedule" subtitle="Set your availability for deliveries" />
-      <div className="max-w-4xl mx-auto">
         {/* Success Message */}
         {saved && (
           <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
@@ -227,7 +226,6 @@ export default function DriverSchedulePage() {
             </div>
           </div>
         </div>
-      </div>
     </>
   )
 }

@@ -218,7 +218,6 @@ export default function SchedulePage() {
   return (
     <>
       <PageHeader title="Schedule Pickup" subtitle="Choose your pickup and delivery details for your laundry service" />
-      <div className="max-w-4xl mx-auto">
         {/* Subscription Benefits Banner */}
         {subscriptionUsage && (
           <div className={`mb-8 border rounded-lg p-4 ${
@@ -702,7 +701,6 @@ export default function SchedulePage() {
             </TumbleButton>
           </div>
         </form>
-      </div>
     </>
   )
 }

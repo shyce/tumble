@@ -298,7 +298,7 @@ export default function SubscriptionPage() {
 
         {/* Current Subscription Management */}
         {currentSubscription && (
-          <div className="bg-white rounded-2xl p-8 shadow-lg max-w-3xl mx-auto mb-12">
+          <div className="bg-white rounded-2xl p-8 shadow-lg mb-12">
             <h2 className="text-2xl font-bold text-slate-900 mb-6">Current Subscription</h2>
             
             <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -367,7 +367,7 @@ export default function SubscriptionPage() {
 
         {/* Subscription Preferences Section */}
         {currentSubscription && (
-          <div className="bg-white rounded-2xl shadow-lg max-w-4xl mx-auto mb-12">
+          <div className="bg-white rounded-2xl shadow-lg mb-12">
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
@@ -414,20 +414,20 @@ export default function SubscriptionPage() {
 
         {/* Success Message */}
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-8 max-w-3xl mx-auto">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-8">
             <p className="text-emerald-700 text-center">{success}</p>
           </div>
         )}
         
         {/* Error Message */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8 max-w-3xl mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
             <p className="text-red-700 text-center">{error}</p>
           </div>
         )}
 
         {/* Plans Grid */}
-        <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto mb-12">
+        <div className="grid md:grid-cols-2 gap-8 mb-12">
           {plans.filter(plan => plan.is_active).map((plan) => {
             const popular = isPlanPopular(plan)
             const features = getPlanFeatures(plan)
@@ -487,7 +487,7 @@ export default function SubscriptionPage() {
         </div>
 
         {/* Additional Options */}
-        <div className="bg-white rounded-2xl p-8 shadow-lg max-w-3xl mx-auto">
+        <div className="bg-white rounded-2xl p-8 shadow-lg">
           <div className="flex items-center mb-4">
             <Package className="w-6 h-6 text-teal-500 mr-3" />
             <h3 className="text-xl font-bold text-slate-800">Additional Services & Pricing</h3>
@@ -545,7 +545,7 @@ export default function SubscriptionPage() {
         {/* FAQ Section */}
         <div className="mt-16 text-center">
           <h2 className="text-2xl font-bold text-slate-900 mb-8">Frequently Asked Questions</h2>
-          <div className="grid gap-6 max-w-3xl mx-auto text-left">
+          <div className="grid gap-6 text-left">
             <div className="bg-white rounded-lg p-6 shadow">
               <h3 className="font-semibold text-slate-800 mb-2">What&apos;s included in a standard bag?</h3>
               <p className="text-slate-600 text-sm">

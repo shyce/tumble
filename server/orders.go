@@ -315,7 +315,7 @@ func (h *OrderHandler) handleCreateOrder(w http.ResponseWriter, r *http.Request)
 		subtotal += price * float64(quantity)
 	}
 	
-	tax := subtotal * 0.08 // 8% tax
+	tax := subtotal * 0.06 // 6% tax
 	total := subtotal + tax
 
 	// Update the order with correct totals
@@ -395,8 +395,8 @@ func (h *OrderHandler) handleGetOrders(w http.ResponseWriter, r *http.Request) {
 			o.id, o.user_id, o.subscription_id, o.pickup_address_id, o.delivery_address_id,
 			o.status, o.total_weight, 
 			COALESCE(oi_totals.subtotal, 0) as subtotal,
-			ROUND(COALESCE(oi_totals.subtotal, 0) * 0.08, 2) as tax,
-			ROUND(COALESCE(oi_totals.subtotal, 0) * 1.08, 2) as total,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 0.06, 2) as tax,
+			ROUND(COALESCE(oi_totals.subtotal, 0) * 1.06, 2) as total,
 			o.special_instructions,
 			o.pickup_date, o.delivery_date, o.pickup_time_slot, o.delivery_time_slot,
 			o.created_at, o.updated_at

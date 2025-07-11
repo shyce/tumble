@@ -79,6 +79,20 @@ export interface UpdateSubscriptionRequest {
   plan_id?: number
 }
 
+export interface SubscriptionChangePreview {
+  current_plan: SubscriptionPlan
+  new_plan: SubscriptionPlan
+  immediate_charge: number
+  immediate_credit: number
+  proration_description: string
+  new_billing_date: string
+  requires_payment_method: boolean
+}
+
+export interface PreviewSubscriptionChangeRequest {
+  new_plan_id: number
+}
+
 // Service request for subscription preferences
 export interface ServiceRequest {
   service_id: number
@@ -394,6 +408,17 @@ export const subscriptionApi = {
       throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
 
+    return response.json()
+  },
+  async previewSubscriptionChange(session: any, request: PreviewSubscriptionChangeRequest): Promise<SubscriptionChangePreview> {
+    const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/subscriptions/preview-change`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
     return response.json()
   }
 }

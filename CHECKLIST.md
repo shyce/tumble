@@ -15,7 +15,7 @@
 - [x] Set up database connection to PostgreSQL
 - [x] Set up Redis connection
 - [x] Configure database migration system
-- [x] Test Go server is accessible (http://localhost:8080)
+- [x] Test Go server is accessible (http://localhost:8082)
 
 ## Next.js Client (Frontend with SSR)
 - [x] Initialize Next.js project in ./client
@@ -26,7 +26,7 @@
 
 ## Integration
 - [x] Ensure all containers can communicate
-- [x] Configure port mappings correctly (8080, 3001, 5432, 6380)
+- [x] Configure port mappings correctly (8082, 3001, 5432, 6380)
 - [x] Test hot reload in development
 - [ ] Verify production build works
 - [x] Document ports and endpoints

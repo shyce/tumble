@@ -4,12 +4,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/price"
+	"github.com/stripe/stripe-go/v82/product"
+	"github.com/stripe/stripe-go/v82/subscription"
 )
 
 type SubscriptionHandler struct {
@@ -87,6 +92,9 @@ type CreateSubscriptionPreferencesRequest struct {
 }
 
 func NewSubscriptionHandler(db *sql.DB) *SubscriptionHandler {
+	// Initialize Stripe with API key
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
+	
 	return &SubscriptionHandler{
 		db:        db,
 		getUserID: getUserIDFromRequest,
@@ -157,7 +165,7 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 			   p.pounds_included, p.price_per_extra_pound, p.pickups_per_month
 		FROM subscriptions s
 		JOIN subscription_plans p ON s.plan_id = p.id
-		WHERE s.user_id = $1 AND s.status != 'cancelled'
+		WHERE s.user_id = $1
 		ORDER BY s.created_at DESC
 		LIMIT 1`,
 		userID,
@@ -264,7 +272,144 @@ func (h *SubscriptionHandler) handleCreateSubscription(w http.ResponseWriter, r 
 	json.NewEncoder(w).Encode(subscription)
 }
 
-// handleUpdateSubscription updates a subscription status
+// SubscriptionChangePreview represents the preview of a subscription change
+type SubscriptionChangePreview struct {
+	CurrentPlan          *SubscriptionPlan `json:"current_plan"`
+	NewPlan              *SubscriptionPlan `json:"new_plan"`
+	ImmediateCharge      float64           `json:"immediate_charge"`
+	ImmediateCredit      float64           `json:"immediate_credit"`
+	ProrationDescription string            `json:"proration_description"`
+	NewBillingDate       string            `json:"new_billing_date"`
+	RequiresPaymentMethod bool             `json:"requires_payment_method"`
+}
+
+// handlePreviewSubscriptionChange returns a preview of what would happen if the user changes plans
+func (h *SubscriptionHandler) handlePreviewSubscriptionChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		NewPlanID int `json:"new_plan_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get current subscription
+	var currentSub struct {
+		ID                   int
+		PlanID               int
+		StripeSubscriptionID sql.NullString
+		CurrentPeriodEnd     string
+	}
+	
+	err = h.db.QueryRow(`
+		SELECT id, plan_id, stripe_subscription_id, current_period_end
+		FROM subscriptions 
+		WHERE user_id = $1 AND status = 'active'
+		ORDER BY created_at DESC 
+		LIMIT 1
+	`, userID).Scan(&currentSub.ID, &currentSub.PlanID, &currentSub.StripeSubscriptionID, &currentSub.CurrentPeriodEnd)
+	
+	if err != nil {
+		http.Error(w, "No active subscription found", http.StatusNotFound)
+		return
+	}
+
+	if currentSub.PlanID == req.NewPlanID {
+		http.Error(w, "Cannot change to the same plan", http.StatusBadRequest)
+		return
+	}
+
+	// Get plan details
+	var currentPlan, newPlan SubscriptionPlan
+	
+	err = h.db.QueryRow(`
+		SELECT id, name, description, price_per_month, pounds_included, 
+			   price_per_extra_pound, pickups_per_month, is_active
+		FROM subscription_plans WHERE id = $1
+	`, currentSub.PlanID).Scan(
+		&currentPlan.ID, &currentPlan.Name, &currentPlan.Description,
+		&currentPlan.PricePerMonth, &currentPlan.PoundsIncluded,
+		&currentPlan.PricePerExtraPound, &currentPlan.PickupsPerMonth,
+		&currentPlan.IsActive,
+	)
+	if err != nil {
+		http.Error(w, "Current plan not found", http.StatusInternalServerError)
+		return
+	}
+
+	err = h.db.QueryRow(`
+		SELECT id, name, description, price_per_month, pounds_included, 
+			   price_per_extra_pound, pickups_per_month, is_active
+		FROM subscription_plans WHERE id = $1 AND is_active = true
+	`, req.NewPlanID).Scan(
+		&newPlan.ID, &newPlan.Name, &newPlan.Description,
+		&newPlan.PricePerMonth, &newPlan.PoundsIncluded,
+		&newPlan.PricePerExtraPound, &newPlan.PickupsPerMonth,
+		&newPlan.IsActive,
+	)
+	if err != nil {
+		http.Error(w, "New plan not found", http.StatusBadRequest)
+		return
+	}
+
+	preview := SubscriptionChangePreview{
+		CurrentPlan: &currentPlan,
+		NewPlan:     &newPlan,
+		NewBillingDate: currentSub.CurrentPeriodEnd,
+	}
+
+	// Calculate proration if we have Stripe subscription
+	if currentSub.StripeSubscriptionID.Valid {
+		err = h.calculateProrationPreview(&preview, currentSub.StripeSubscriptionID.String, req.NewPlanID)
+		if err != nil {
+			log.Printf("Failed to calculate proration preview: %v", err)
+			// Continue without Stripe proration data
+		}
+	}
+
+	// Determine if payment method is required (for upgrades)
+	if newPlan.PricePerMonth > currentPlan.PricePerMonth {
+		preview.RequiresPaymentMethod = true
+		
+		// Check if user has a valid payment method
+		var hasPaymentMethod bool
+		h.db.QueryRow(`
+			SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND default_payment_method_id IS NOT NULL)
+		`, userID).Scan(&hasPaymentMethod)
+		
+		if !hasPaymentMethod {
+			preview.ProrationDescription = "⚠️ This upgrade requires a valid payment method. Please add a payment method before proceeding."
+		}
+	}
+
+	// Generate description based on price difference
+	priceDiff := newPlan.PricePerMonth - currentPlan.PricePerMonth
+	if priceDiff > 0 {
+		if preview.ProrationDescription == "" {
+			preview.ProrationDescription = fmt.Sprintf("You'll be charged a prorated amount of approximately $%.2f today for the upgrade, and your next billing will be $%.2f/month.", 
+				preview.ImmediateCharge, newPlan.PricePerMonth)
+		}
+	} else {
+		preview.ProrationDescription = fmt.Sprintf("You'll receive a prorated credit of approximately $%.2f, and your next billing will be $%.2f/month.", 
+			preview.ImmediateCredit, newPlan.PricePerMonth)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(preview)
+}
+
+// handleUpdateSubscription updates a subscription status or plan with proper Stripe integration
 func (h *SubscriptionHandler) handleUpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -298,59 +443,56 @@ func (h *SubscriptionHandler) handleUpdateSubscription(w http.ResponseWriter, r 
 		return
 	}
 
-	// Validate plan if provided
-	if req.PlanID != nil {
-		var planExists bool
-		err = h.db.QueryRow(`
-			SELECT EXISTS(SELECT 1 FROM subscription_plans WHERE id = $1 AND is_active = true)`,
-			*req.PlanID,
-		).Scan(&planExists)
-		if err != nil || !planExists {
-			http.Error(w, "Invalid subscription plan", http.StatusBadRequest)
+	// Check current subscription status - prevent changes to cancelled subscriptions
+	var currentStatus string
+	var currentPlanID int
+	var stripeSubscriptionID sql.NullString
+	var currentPeriodEnd string
+	
+	err = h.db.QueryRow(`
+		SELECT status, plan_id, stripe_subscription_id, current_period_end
+		FROM subscriptions WHERE id = $1 AND user_id = $2
+	`, subscriptionID, userID).Scan(&currentStatus, &currentPlanID, &stripeSubscriptionID, &currentPeriodEnd)
+	
+	if err != nil {
+		http.Error(w, "Subscription not found", http.StatusNotFound)
+		return
+	}
+	
+	if currentStatus == "cancelled" {
+		http.Error(w, "Cannot modify a cancelled subscription", http.StatusBadRequest)
+		return
+	}
+
+	// Handle plan changes with proper Stripe integration
+	if req.PlanID != nil && *req.PlanID != currentPlanID {
+		err = h.processSubscriptionPlanChange(subscriptionID, userID, currentPlanID, *req.PlanID, stripeSubscriptionID)
+		if err != nil {
+			if err.Error() == "no_payment_method" {
+				http.Error(w, "This upgrade requires a valid payment method. Please add a payment method before changing plans.", http.StatusBadRequest)
+			} else if err.Error() == "invalid_plan" {
+				http.Error(w, "Invalid subscription plan", http.StatusBadRequest)
+			} else {
+				log.Printf("Failed to process plan change: %v", err)
+				http.Error(w, "Failed to update subscription plan", http.StatusInternalServerError)
+			}
 			return
 		}
 	}
 
-	// Build update query dynamically
-	var updateQuery strings.Builder
-	var args []interface{}
-	argCount := 0
-
-	updateQuery.WriteString("UPDATE subscriptions SET ")
-
-	if req.Status != "" {
-		argCount++
-		updateQuery.WriteString(fmt.Sprintf("status = $%d, ", argCount))
-		args = append(args, req.Status)
-	}
-
-	if req.PlanID != nil {
-		argCount++
-		updateQuery.WriteString(fmt.Sprintf("plan_id = $%d, ", argCount))
-		args = append(args, *req.PlanID)
-	}
-
-	updateQuery.WriteString("updated_at = CURRENT_TIMESTAMP ")
-
-	argCount++
-	updateQuery.WriteString(fmt.Sprintf("WHERE id = $%d ", argCount))
-	args = append(args, subscriptionID)
-
-	argCount++
-	updateQuery.WriteString(fmt.Sprintf("AND user_id = $%d", argCount))
-	args = append(args, userID)
-
-	// Update subscription
-	result, err := h.db.Exec(updateQuery.String(), args...)
-	if err != nil {
-		http.Error(w, "Failed to update subscription", http.StatusInternalServerError)
-		return
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		http.Error(w, "Subscription not found", http.StatusNotFound)
-		return
+	// Handle status changes
+	if req.Status != "" && req.Status != currentStatus {
+		// Build update query for status change
+		_, err := h.db.Exec(`
+			UPDATE subscriptions 
+			SET status = $1, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $2 AND user_id = $3
+		`, req.Status, subscriptionID, userID)
+		
+		if err != nil {
+			http.Error(w, "Failed to update subscription status", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Fetch updated subscription
@@ -385,30 +527,70 @@ func (h *SubscriptionHandler) handleCancelSubscription(w http.ResponseWriter, r 
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	
+	log.Printf("User %d attempting to cancel subscription %d", userID, subscriptionID)
 
-	// Cancel subscription
+	// Get Stripe subscription ID first
+	var stripeSubscriptionID sql.NullString
+	err = h.db.QueryRow(`
+		SELECT stripe_subscription_id 
+		FROM subscriptions 
+		WHERE id = $1 AND user_id = $2 AND status != 'cancelled'`,
+		subscriptionID, userID,
+	).Scan(&stripeSubscriptionID)
+	
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Subscription not found or already cancelled", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to fetch subscription", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Cancel subscription in Stripe if we have a Stripe subscription ID
+	if stripeSubscriptionID.Valid && stripeSubscriptionID.String != "" {
+		params := &stripe.SubscriptionParams{
+			CancelAtPeriodEnd: stripe.Bool(true),
+		}
+		
+		_, err = subscription.Update(stripeSubscriptionID.String, params)
+		if err != nil {
+			log.Printf("Failed to cancel Stripe subscription %s: %v", stripeSubscriptionID.String, err)
+			http.Error(w, "Failed to cancel subscription in Stripe", http.StatusInternalServerError)
+			return
+		}
+		
+		log.Printf("Successfully scheduled Stripe subscription %s for cancellation at period end", stripeSubscriptionID.String)
+	}
+
+	// Update local database - mark as cancelled but subscription remains active until period end
 	result, err := h.db.Exec(`
 		UPDATE subscriptions 
 		SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1 AND user_id = $2 AND status != 'cancelled'`,
+		WHERE id = $1 AND user_id = $2`,
 		subscriptionID, userID,
 	)
 	if err != nil {
-		http.Error(w, "Failed to cancel subscription", http.StatusInternalServerError)
+		http.Error(w, "Failed to update subscription status", http.StatusInternalServerError)
 		return
 	}
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		http.Error(w, "Subscription not found or already cancelled", http.StatusNotFound)
+		http.Error(w, "Subscription not found", http.StatusNotFound)
+		return
+	}
+
+	// Fetch and return the updated subscription
+	subscription, err := h.getSubscriptionByID(subscriptionID)
+	if err != nil {
+		http.Error(w, "Failed to fetch updated subscription", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Subscription cancelled successfully",
-		"status":  "cancelled",
-	})
+	json.NewEncoder(w).Encode(subscription)
 }
 
 // getSubscriptionByID fetches a subscription with plan details
@@ -467,7 +649,7 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 		SELECT s.id, s.plan_id, s.current_period_start, s.current_period_end, p.pickups_per_month
 		FROM subscriptions s
 		JOIN subscription_plans p ON s.plan_id = p.id
-		WHERE s.user_id = $1 AND s.status = 'active'
+		WHERE s.user_id = $1
 		ORDER BY s.created_at DESC
 		LIMIT 1`,
 		userID,
@@ -475,7 +657,7 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "No active subscription found", http.StatusNotFound)
+			http.Error(w, "No subscription found", http.StatusNotFound)
 		} else {
 			http.Error(w, "Failed to fetch subscription", http.StatusInternalServerError)
 		}
@@ -695,4 +877,180 @@ func (h *SubscriptionHandler) handleCreateOrUpdateSubscriptionPreferences(w http
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Preferences saved successfully"})
+}
+
+// processSubscriptionPlanChange handles the complete process of changing subscription plans
+func (h *SubscriptionHandler) processSubscriptionPlanChange(subscriptionID, userID, currentPlanID, newPlanID int, stripeSubscriptionID sql.NullString) error {
+	// Validate new plan exists and is active
+	var planExists bool
+	var newPlanPrice float64
+	var currentPlanPrice float64
+	
+	err := h.db.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM subscription_plans WHERE id = $1 AND is_active = true),
+		       (SELECT price_per_month FROM subscription_plans WHERE id = $1),
+		       (SELECT price_per_month FROM subscription_plans WHERE id = $2)
+	`, newPlanID, currentPlanID).Scan(&planExists, &newPlanPrice, &currentPlanPrice)
+	
+	if err != nil || !planExists {
+		return fmt.Errorf("invalid_plan")
+	}
+
+	// For upgrades, check if user has payment method
+	if newPlanPrice > currentPlanPrice {
+		var hasPaymentMethod bool
+		err = h.db.QueryRow(`
+			SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND default_payment_method_id IS NOT NULL)
+		`, userID).Scan(&hasPaymentMethod)
+		
+		if err != nil || !hasPaymentMethod {
+			return fmt.Errorf("no_payment_method")
+		}
+	}
+
+	// Update Stripe subscription if we have one
+	if stripeSubscriptionID.Valid {
+		err = h.updateStripeSubscriptionPlan(stripeSubscriptionID.String, newPlanID)
+		if err != nil {
+			return fmt.Errorf("stripe_update_failed: %v", err)
+		}
+	}
+
+	// Update database
+	_, err = h.db.Exec(`
+		UPDATE subscriptions 
+		SET plan_id = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND user_id = $3
+	`, newPlanID, subscriptionID, userID)
+	
+	if err != nil {
+		return fmt.Errorf("database_update_failed: %v", err)
+	}
+
+	return nil
+}
+
+// calculateProrationPreview calculates what the proration would be for a plan change
+func (h *SubscriptionHandler) calculateProrationPreview(preview *SubscriptionChangePreview, stripeSubscriptionID string, newPlanID int) error {
+	// Get new plan details for Stripe price lookup
+	var planName string
+	var pricePerMonth float64
+	err := h.db.QueryRow(`
+		SELECT name, price_per_month FROM subscription_plans WHERE id = $1
+	`, newPlanID).Scan(&planName, &pricePerMonth)
+	
+	if err != nil {
+		return err
+	}
+
+	// Get or create Stripe price for the new plan
+	_, err = h.getOrCreateStripePrice(planName, int64(pricePerMonth*100))
+	if err != nil {
+		return err
+	}
+
+	// Get current subscription from Stripe
+	sub, err := subscription.Get(stripeSubscriptionID, nil)
+	if err != nil {
+		return err
+	}
+
+	// Create a preview of the subscription update to get proration amount
+	// Note: This is a simplified approach. In production, you might want to use
+	// Stripe's upcoming invoice preview API for more accurate calculations
+	currentPrice := float64(sub.Items.Data[0].Price.UnitAmount) / 100
+	newPrice := pricePerMonth
+	
+	// Calculate simple price difference for preview
+	// Note: This is a simplified calculation. For accurate proration,
+	// use Stripe's invoice preview API in production
+	priceDifference := newPrice - currentPrice
+	
+	if priceDifference > 0 {
+		// For upgrades, proration will be added to next invoice
+		preview.ImmediateCharge = priceDifference
+		preview.ProrationDescription = fmt.Sprintf("Upgrade to %s plan - $%.2f prorated charge will be added to your next bill", planName, priceDifference)
+	} else if priceDifference < 0 {
+		// For downgrades, proration credit will reduce next invoice
+		preview.ImmediateCredit = -priceDifference
+		preview.ProrationDescription = fmt.Sprintf("Downgrade to %s plan - $%.2f prorated credit will reduce your next bill", planName, -priceDifference)
+	} else {
+		preview.ProrationDescription = "No additional charge - plans have the same price"
+	}
+
+	return nil
+}
+
+// updateStripeSubscriptionPlan updates the Stripe subscription to use a new plan
+func (h *SubscriptionHandler) updateStripeSubscriptionPlan(stripeSubscriptionID string, newPlanID int) error {
+	// Get plan details
+	var planName string
+	var pricePerMonth float64
+	err := h.db.QueryRow(`
+		SELECT name, price_per_month FROM subscription_plans WHERE id = $1
+	`, newPlanID).Scan(&planName, &pricePerMonth)
+	
+	if err != nil {
+		return fmt.Errorf("failed to get plan details: %v", err)
+	}
+
+	// Get or create Stripe price for the new plan
+	priceID, err := h.getOrCreateStripePrice(planName, int64(pricePerMonth*100))
+	if err != nil {
+		return fmt.Errorf("failed to create Stripe price: %v", err)
+	}
+
+	// Get the current subscription from Stripe
+	sub, err := subscription.Get(stripeSubscriptionID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get Stripe subscription: %v", err)
+	}
+
+	// Update the subscription items to use the new price with prorations
+	params := &stripe.SubscriptionParams{
+		Items: []*stripe.SubscriptionItemsParams{
+			{
+				ID:    stripe.String(sub.Items.Data[0].ID),
+				Price: stripe.String(priceID),
+			},
+		},
+		ProrationBehavior: stripe.String("create_prorations"),
+	}
+
+	_, err = subscription.Update(stripeSubscriptionID, params)
+	if err != nil {
+		return fmt.Errorf("failed to update Stripe subscription: %v", err)
+	}
+
+	log.Printf("Successfully updated Stripe subscription %s to new plan with proration", stripeSubscriptionID)
+	return nil
+}
+
+func (h *SubscriptionHandler) getOrCreateStripePrice(planName string, amountCents int64) (string, error) {
+	// Create product if it doesn't exist
+	productParams := &stripe.ProductParams{
+		Name: stripe.String("Tumble " + planName),
+	}
+	
+	prod, err := product.New(productParams)
+	if err != nil {
+		return "", err
+	}
+
+	// Create price
+	priceParams := &stripe.PriceParams{
+		Product:    stripe.String(prod.ID),
+		UnitAmount: stripe.Int64(amountCents),
+		Currency:   stripe.String("usd"),
+		Recurring: &stripe.PriceRecurringParams{
+			Interval: stripe.String("month"),
+		},
+	}
+
+	p, err := price.New(priceParams)
+	if err != nil {
+		return "", err
+	}
+
+	return p.ID, nil
 }

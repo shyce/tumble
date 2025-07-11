@@ -75,7 +75,8 @@ export default function SchedulePage() {
           // Set default order item to standard bag service
           const standardBagService = servicesData.find(s => s.name === 'standard_bag')
           if (standardBagService) {
-            setOrderItems([{ service_id: standardBagService.id, quantity: 1, price: standardBagService.base_price }])
+            // Standard totes are $45 for pay-as-you-go customers
+            setOrderItems([{ service_id: standardBagService.id, quantity: 1, price: 45 }])
           }
 
           // Set default dates (tomorrow for pickup, day after for delivery)
@@ -107,7 +108,8 @@ export default function SchedulePage() {
   const addOrderItem = () => {
     const standardBagService = services.find(s => s.name === 'standard_bag')
     if (standardBagService) {
-      setOrderItems(prev => [...prev, { service_id: standardBagService.id, quantity: 1, price: standardBagService.base_price }])
+      // Standard totes are $45 for pay-as-you-go customers
+      setOrderItems(prev => [...prev, { service_id: standardBagService.id, quantity: 1, price: 45 }])
     }
   }
 
@@ -118,15 +120,19 @@ export default function SchedulePage() {
   }
 
   const calculateCost = (): CostCalculation => {
-    // Calculate pickup service cost ($10, covered if pickups remaining)
+    // Calculate pickup service cost (free with subscription, $10 without)
     const pickupServiceCost = 10.0
-    const pickupCovered = subscriptionUsage && subscriptionUsage.pickups_remaining > 0
-    const pickupCharge = pickupCovered ? 0 : pickupServiceCost
+    const pickupCovered = !!(subscriptionUsage && subscriptionUsage.pickups_remaining > 0)
     
-    // Calculate bag costs
-    const bagSubtotal = orderItems.reduce((total, item) => total + (item.price * item.quantity), 0)
+    // Calculate bag costs - Standard Totes are $45 pay-as-you-go
+    const bagSubtotal = orderItems.reduce((total, item) => {
+      const service = services.find(s => s.id === item.service_id)
+      // Standard totes are $45 for pay-as-you-go customers
+      const price = service?.name === 'standard_bag' ? 45 : (service?.base_price || 0)
+      return total + (price * item.quantity)
+    }, 0)
     
-    // Calculate subscription benefits for bags (separate from pickup coverage)
+    // Calculate subscription benefits for bags
     let bagSubscriptionDiscount = 0
     let coveredBags = 0
     let hasSubscriptionBenefits = pickupCovered
@@ -144,7 +150,8 @@ export default function SchedulePage() {
         coveredBags = Math.min(totalBagsInOrder, subscriptionUsage.bags_remaining)
         
         if (coveredBags > 0) {
-          bagSubscriptionDiscount = standardBagService.base_price * coveredBags
+          // Subscribers get standard totes covered by their plan
+          bagSubscriptionDiscount = 45 * coveredBags
           hasSubscriptionBenefits = true
         }
       }
@@ -153,7 +160,7 @@ export default function SchedulePage() {
     const totalSubscriptionDiscount = (pickupCovered ? pickupServiceCost : 0) + bagSubscriptionDiscount
     const subtotalBeforeDiscount = pickupServiceCost + bagSubtotal
     const finalSubtotal = Math.max(0, subtotalBeforeDiscount - totalSubscriptionDiscount)
-    const tax = finalSubtotal * 0.08 // 8% tax
+    const tax = finalSubtotal * 0.06 // 6% tax
     const total = finalSubtotal + tax + tip
     
     return {
@@ -164,7 +171,7 @@ export default function SchedulePage() {
       tip,
       total,
       covered_bags: coveredBags,
-      has_subscription_benefits: hasSubscriptionBenefits
+      has_subscription_benefits: !!hasSubscriptionBenefits
     }
   }
   
@@ -217,7 +224,7 @@ export default function SchedulePage() {
 
   return (
     <>
-      <PageHeader title="Schedule Pickup" subtitle="Choose your pickup and delivery details for your laundry service" />
+      <PageHeader title="Schedule Pickup" subtitle="Fresh laundry service with pickup and delivery at your convenience" />
         {/* Subscription Benefits Banner */}
         {subscriptionUsage && (
           <div className={`mb-8 border rounded-lg p-4 ${
@@ -436,18 +443,24 @@ export default function SchedulePage() {
                     onChange={(e) => {
                       const serviceId = Number(e.target.value)
                       const service = services.find(s => s.id === serviceId)
+                      // Standard totes are $45 for pay-as-you-go customers
+                      const price = service?.name === 'standard_bag' ? 45 : (service?.base_price || 0)
                       updateOrderItem(index, { 
                         service_id: serviceId, 
-                        price: service?.base_price || 0 
+                        price: price 
                       })
                     }}
                     className="flex-1 p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-slate-900 bg-white"
                   >
-                    {services.filter(service => service.name !== 'pickup_service').map(service => (
-                      <option key={service.id} value={service.id}>
-                        {service.description} - ${service.base_price}
-                      </option>
-                    ))}
+                    {services.filter(service => service.name !== 'pickup_service').map(service => {
+                      // Standard totes are $45 for pay-as-you-go customers
+                      const displayPrice = service.name === 'standard_bag' ? 45 : service.base_price
+                      return (
+                        <option key={service.id} value={service.id}>
+                          {service.description} - ${displayPrice}
+                        </option>
+                      )
+                    })}
                   </select>
 
                   <div className="flex items-center space-x-2">
@@ -538,7 +551,7 @@ export default function SchedulePage() {
                   )}
                   
                   <div className="flex justify-between text-slate-700">
-                    <span>Tax (8%):</span>
+                    <span>Tax (6%):</span>
                     <span>${costCalculation.tax.toFixed(2)}</span>
                   </div>
                   

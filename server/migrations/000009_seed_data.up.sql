@@ -1,16 +1,15 @@
--- Insert subscription plans based on actual Tumble pricing
+-- Insert subscription plans based on new PRICING.md structure
 INSERT INTO subscription_plans (name, description, price_per_month, pounds_included, price_per_extra_pound, pickups_per_month) VALUES
-('Weekly Standard', 'Standard Tumble bag service weekly', 170.00, 0, 0.00, 4),
-('Bi-Weekly Standard', 'Standard Tumble bag service bi-weekly', 90.00, 0, 0.00, 2),
-('Weekly Rush', 'Rush Tumble bag service weekly', 220.00, 0, 0.00, 4),
-('Bi-Weekly Rush', 'Rush Tumble bag service bi-weekly', 110.00, 0, 0.00, 2);
+('Fresh Start', 'Single/Student Plan - 2 Standard Bag pickups per month (~4 loads)', 48.00, 0, 0.00, 2),
+('Family Fresh', 'Most Popular - 6 Standard Bag pickups per month (~12 loads)', 130.00, 0, 0.00, 6),
+('House Fresh', 'Large Family Plan - 12 Standard Bag pickups per month (~24 loads)', 240.00, 0, 0.00, 12);
 
--- Insert service types based on actual Tumble pricing
+-- Insert service types based on new PRICING.md structure
 INSERT INTO services (name, description, base_price, price_per_pound) VALUES
-('standard_bag', 'Standard Tumble Bag', 45.00, 0.00),
-('rush_bag', 'Rush Tumble Bag (faster turnaround)', 55.00, 0.00),
-('additional_bag', 'Additional bags beyond subscription', 40.00, 0.00),
-('comforter', 'Comforter cleaning', 25.00, 0.00),
+('standard_bag', 'Standard Tote (22"×33", ~2 loads)', 45.00, 0.00),
+('rush_bag', 'Rush Service (faster turnaround)', 10.00, 0.00),
+('additional_bag', 'Additional Standard Tote', 40.00, 0.00),
+('bedding', 'Bedding', 25.00, 0.00),
 ('pickup_service', 'Pickup and delivery service', 10.00, 0.00),
 ('sensitive_skin_detergent', 'Sensitive Skin Detergent add-on', 3.00, 0.00),
 ('scent_booster', 'Scent Booster add-on', 3.00, 0.00);

@@ -57,7 +57,7 @@ case "$1" in
         PASSWORD="$3"
         
         echo "Testing login for $EMAIL..."
-        curl -X POST http://localhost:8080/api/auth/login \
+        curl -X POST http://localhost:8082/api/auth/login \
              -H "Content-Type: application/json" \
              -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
              | jq '.'

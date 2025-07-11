@@ -39,7 +39,7 @@ func (h *ServiceHandler) handleGetServices(w http.ResponseWriter, r *http.Reques
 				WHEN name = 'standard_bag' THEN 1
 				WHEN name = 'rush_bag' THEN 2
 				WHEN name = 'additional_bag' THEN 3
-				WHEN name = 'comforter' THEN 4
+				WHEN name = 'bedding' THEN 4
 				ELSE 5
 			END,
 			name`)

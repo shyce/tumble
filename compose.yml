@@ -18,7 +18,7 @@ services:
       POSTGRES_PASSWORD: tumble_pass
       POSTGRES_DB: tumble
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +32,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6380:6379"
+      - "6381:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -48,21 +48,11 @@ services:
       context: ./server
       dockerfile: Dockerfile.dev
     ports:
-      - "8080:8080"
+      - "8082:8082"
     volumes:
       - ./server:/app
+    env_file: .env
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: tumble
-      DB_PASSWORD: tumble_pass
-      DB_NAME: tumble
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
-      GOOGLE_CLIENT_ID: your-google-client-id
-      GOOGLE_CLIENT_SECRET: your-google-client-secret
-      FRONTEND_URL: http://localhost:3005
       LOG_LEVEL: DEBUG
       LOG_FORMAT: text
     depends_on:
@@ -82,14 +72,10 @@ services:
     volumes:
       - ./client:/app
       - /app/.next
+    env_file: .env
     environment:
-      NODE_ENV: development
-      API_URL: http://server:8080
+      API_URL: http://server:8082
       AUTH_SECRET: qG8/yMqJJGb4MJrf4sR1RWpjOTottFOr1SajSgeCmD0=
-      NEXTAUTH_SECRET: qG8/yMqJJGb4MJrf4sR1RWpjOTottFOr1SajSgeCmD0=
-      NEXTAUTH_URL: https://tumble.royer.app
-      GOOGLE_CLIENT_ID: your-google-client-id
-      GOOGLE_CLIENT_SECRET: your-google-client-secret
     depends_on:
       - server
     networks:

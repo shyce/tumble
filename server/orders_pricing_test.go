@@ -24,8 +24,8 @@ func TestOrderHandler_SubscriptionPricingCalculations(t *testing.T) {
 	standardBagID := db.GetServiceID(t, "standard_bag")
 	rushBagID := db.GetServiceID(t, "rush_bag")
 	
-	// Create a weekly subscription (4 pickups/bags per month)
-	_ = db.CreateTestSubscription(t, userID, 1) // Plan ID 1 = Weekly Standard
+	// Create a Family Fresh subscription (6 pickups/bags per month)
+	_ = db.CreateTestSubscription(t, userID, 2) // Plan ID 2 = Family Fresh
 	
 	mockRealtime := NewMockRealtimeHandler()
 
@@ -52,53 +52,53 @@ func TestOrderHandler_SubscriptionPricingCalculations(t *testing.T) {
 			description:         "First bag and pickup should be covered by subscription",
 		},
 		{
-			name: "Three standard bags - all covered",
+			name: "Six standard bags - all covered",
 			orderItems: []OrderItem{
-				{ServiceID: standardBagID, Quantity: 3, Price: 45.00},
+				{ServiceID: standardBagID, Quantity: 6, Price: 45.00},
 			},
-			expectedSubtotal:    0.00,  // Pickup covered, all 3 bags covered
+			expectedSubtotal:    0.00,  // Pickup covered, all 6 bags covered
 			expectedTax:         0.00,
 			expectedTotal:       0.00,
-			expectedCoveredBags: 3,
+			expectedCoveredBags: 6,
 			expectedChargedBags: 0,
-			description:         "All 3 bags and pickup should be covered with 4-bag subscription",
+			description:         "All 6 bags and pickup should be covered with 6-bag subscription",
 		},
 		{
-			name: "Five standard bags - partial coverage",
+			name: "Seven standard bags - partial coverage",
 			orderItems: []OrderItem{
-				{ServiceID: standardBagID, Quantity: 5, Price: 45.00},
+				{ServiceID: standardBagID, Quantity: 7, Price: 45.00},
 			},
-			expectedSubtotal:    45.00, // Pickup covered, 4 bags covered, 1 bag charged at $45
-			expectedTax:         3.60,  // 8% of $45
-			expectedTotal:       48.60,
-			expectedCoveredBags: 4,
+			expectedSubtotal:    45.00, // Pickup covered, 6 bags covered, 1 bag charged at $45
+			expectedTax:         2.70,  // 6% of $45
+			expectedTotal:       47.70,
+			expectedCoveredBags: 6,
 			expectedChargedBags: 1,
-			description:         "Pickup covered, 4 bags covered, 5th bag charged",
+			description:         "Pickup covered, 6 bags covered, 7th bag charged",
 		},
 		{
 			name: "Standard + Rush bags - only standard covered",
 			orderItems: []OrderItem{
 				{ServiceID: standardBagID, Quantity: 2, Price: 45.00},
-				{ServiceID: rushBagID, Quantity: 1, Price: 55.00},
+				{ServiceID: rushBagID, Quantity: 1, Price: 10.00}, // Rush service is $10 addon
 			},
-			expectedSubtotal:    55.00, // Pickup covered, 2 standard covered, rush charged
-			expectedTax:         4.40,  // 8% of $55
-			expectedTotal:       59.40,
+			expectedSubtotal:    10.00, // Pickup covered, 2 standard covered, rush charged
+			expectedTax:         0.60,  // 6% of $10
+			expectedTotal:       10.60,
 			expectedCoveredBags: 2,
 			expectedChargedBags: 0, // Rush bags don't count toward bag limit
-			description:         "Pickup and standard bags covered, rush bags always charged",
+			description:         "Pickup and standard bags covered, rush service charged",
 		},
 		{
-			name: "Only rush bags - no coverage",
+			name: "Only rush service - no coverage",
 			orderItems: []OrderItem{
-				{ServiceID: rushBagID, Quantity: 2, Price: 55.00},
+				{ServiceID: rushBagID, Quantity: 2, Price: 10.00}, // Rush service is $10 addon
 			},
-			expectedSubtotal:    110.00, // Pickup covered, rush bags charged
-			expectedTax:         8.80,   // 8% of $110
-			expectedTotal:       118.80,
+			expectedSubtotal:    20.00, // Pickup covered, rush service charged
+			expectedTax:         1.20,  // 6% of $20
+			expectedTotal:       21.20,
 			expectedCoveredBags: 0,
-			expectedChargedBags: 0, // Rush bags don't count toward bag limit
-			description:         "Pickup covered, rush bags should never be covered by subscription",
+			expectedChargedBags: 0, // Rush service doesn't count toward bag limit
+			description:         "Pickup covered, rush service should never be covered by subscription",
 		},
 	}
 
@@ -226,7 +226,7 @@ func TestOrderHandler_OrderViewingAccuracy(t *testing.T) {
 	rushBagID := db.GetServiceID(t, "rush_bag")
 	
 	// Create subscription
-	_ = db.CreateTestSubscription(t, userID, 1) // Weekly Standard
+	_ = db.CreateTestSubscription(t, userID, 2) // Family Fresh
 	
 	mockRealtime := NewMockRealtimeHandler()
 	handler := &OrderHandler{
@@ -388,7 +388,7 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		INSERT INTO subscriptions (user_id, plan_id, status, current_period_start, current_period_end)
 		VALUES ($1, $2, 'active', '2024-12-01', '2024-12-31')
 		RETURNING id`,
-		userID, 1, // Weekly Standard (4 bags)
+		userID, 2, // Family Fresh (3 bags)
 	).Scan(&subscriptionID)
 	if err != nil {
 		t.Fatalf("Failed to create test subscription: %v", err)
@@ -403,7 +403,7 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		},
 	}
 
-	// First order: Use 3 bags (1 remaining)
+	// First order: Use 4 bags (2 remaining)
 	requestBody := CreateOrderRequest{
 		PickupAddressID:   addressID,
 		DeliveryAddressID: addressID,
@@ -412,7 +412,7 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		PickupTimeSlot:    "9am-12pm",
 		DeliveryTimeSlot:  "1pm-5pm",
 		Items: []OrderItem{
-			{ServiceID: standardBagID, Quantity: 3, Price: 45.00},
+			{ServiceID: standardBagID, Quantity: 4, Price: 45.00},
 		},
 	}
 
@@ -428,7 +428,7 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		t.Fatalf("First order failed: %d - %s", w.Code, w.Body.String())
 	}
 
-	// Verify first order used 3 covered bags
+	// Verify first order used 4 covered bags
 	var firstOrder Order
 	json.Unmarshal(w.Body.Bytes(), &firstOrder)
 	
@@ -436,9 +436,9 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		t.Errorf("First order should have $0 subtotal (all covered), got %.2f", *firstOrder.Subtotal)
 	}
 
-	// Second order: Try to use 2 more bags (should cover 1, charge 1)
+	// Second order: Try to use 3 more bags (should cover 2, charge 1)
 	requestBody.Items = []OrderItem{
-		{ServiceID: standardBagID, Quantity: 2, Price: 45.00},
+		{ServiceID: standardBagID, Quantity: 3, Price: 45.00},
 	}
 
 	body, _ = json.Marshal(requestBody)
@@ -456,10 +456,10 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 	var secondOrder Order
 	json.Unmarshal(w.Body.Bytes(), &secondOrder)
 
-	// Should charge for 1 bag (1 covered, 1 charged)
+	// Should charge for 1 bag (2 covered, 1 charged)
 	expectedSubtotal := 45.00
-	expectedTax := 3.60
-	expectedTotal := 48.60
+	expectedTax := expectedSubtotal * 0.06 // 6% tax
+	expectedTotal := expectedSubtotal + expectedTax
 
 	if *secondOrder.Subtotal != expectedSubtotal {
 		t.Errorf("Second order subtotal: expected %.2f, got %.2f", expectedSubtotal, *secondOrder.Subtotal)
@@ -486,8 +486,8 @@ func TestOrderHandler_SubscriptionExhaustionScenarios(t *testing.T) {
 		}
 	}
 
-	if coveredBags != 1 {
-		t.Errorf("Expected 1 covered bag in second order, got %d", coveredBags)
+	if coveredBags != 2 {
+		t.Errorf("Expected 2 covered bags in second order, got %d", coveredBags)
 	}
 
 	if chargedBags != 1 {

@@ -1,16 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import Link from 'next/link'
-import { Sparkles, Calendar, CheckCircle, ArrowLeft, Package, Settings, Clock, MapPin, Save } from 'lucide-react'
+import { Calendar, CheckCircle, Package, Settings, Clock, MapPin, Save } from 'lucide-react'
 import { 
   SubscriptionPlan, 
   Subscription, 
   SubscriptionPreferences, 
   CreateSubscriptionPreferencesRequest,
   SubscriptionUsage,
+  SubscriptionChangePreview,
   subscriptionApi,
   addressApi,
   serviceApi,
@@ -19,6 +18,7 @@ import {
 } from '@/lib/api'
 import PageHeader from '@/components/PageHeader'
 import { TumbleButton } from '@/components/ui/tumble-button'
+import SubscriptionPaymentModal from '@/components/SubscriptionPaymentModal'
 
 export default function SubscriptionPage() {
   const { data: session, status } = useSession()
@@ -29,7 +29,6 @@ export default function SubscriptionPage() {
   const [plansLoading, setPlansLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const router = useRouter()
 
   // Subscription preferences state
   const [preferences, setPreferences] = useState<SubscriptionPreferences | null>(null)
@@ -38,6 +37,13 @@ export default function SubscriptionPage() {
   const [preferencesLoading, setPreferencesLoading] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
 
+  // Payment flow state
+  const [showPaymentSetup, setShowPaymentSetup] = useState(false)
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null)
+  const [showPlanChangePreview, setShowPlanChangePreview] = useState(false)
+  const [planChangePreview, setPlanChangePreview] = useState<SubscriptionChangePreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
   // Load subscription plans and current subscription
   useEffect(() => {
     if (status === 'loading') return
@@ -45,36 +51,18 @@ export default function SubscriptionPage() {
     const loadData = async () => {
       try {
         // Load plans first (this should always work - no auth required)
-        const plansResponse = await fetch('/api/v1/subscriptions/plans')
-        if (plansResponse.ok) {
-          const fetchedPlans = await plansResponse.json()
-          setPlans(fetchedPlans)
-        } else {
-          throw new Error('Failed to fetch subscription plans')
-        }
+        const fetchedPlans = await subscriptionApi.getPlans()
+        setPlans(fetchedPlans)
         
         // Then try to load current subscription and usage if user is logged in
         if (session?.user) {
           try {
-            const [subResponse, usageData] = await Promise.all([
-              fetch('/api/v1/subscriptions/current', {
-                headers: {
-                  'Authorization': `Bearer ${(session as any)?.accessToken}`,
-                },
-              }),
+            const [currentSub, usageData] = await Promise.all([
+              subscriptionApi.getCurrentSubscription(session),
               subscriptionApi.getSubscriptionUsage(session)
             ])
             
-            if (subResponse.ok) {
-              const currentSub = await subResponse.json()
-              setCurrentSubscription(currentSub)
-            } else if (subResponse.status === 404) {
-              // No subscription found, which is fine
-              setCurrentSubscription(null)
-            } else {
-              console.log('Error fetching current subscription:', subResponse.status)
-            }
-            
+            setCurrentSubscription(currentSub)
             setSubscriptionUsage(usageData)
           } catch (subError) {
             // It's okay if there's no current subscription, just log it
@@ -123,46 +111,59 @@ export default function SubscriptionPage() {
       return
     }
     
+    // Check if user has a default address before proceeding
+    try {
+      const addresses = await addressApi.getAddresses(session)
+      const hasDefaultAddress = addresses.some((addr) => addr.is_default)
+      
+      if (!hasDefaultAddress) {
+        setError('Please set a default address in your account before subscribing. This is required for tax calculation. Go to Settings → Addresses to add your address.')
+        return
+      }
+    } catch (err) {
+      console.warn('Could not check addresses, proceeding with subscription attempt')
+    }
+    
+    if (currentSubscription) {
+      // Show plan change preview for existing subscription
+      await showPlanChangePreviewModal(planId)
+    } else {
+      // New subscription - requires payment setup
+      setSelectedPlanId(planId)
+      setShowPaymentSetup(true)
+    }
+  }
+
+  const showPlanChangePreviewModal = async (newPlanId: number) => {
+    setPreviewLoading(true)
+    setError(null)
+    
+    try {
+      const preview = await subscriptionApi.previewSubscriptionChange(session, { new_plan_id: newPlanId })
+      setPlanChangePreview(preview)
+      setSelectedPlanId(newPlanId)
+      setShowPlanChangePreview(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to preview plan change')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const confirmPlanChange = async () => {
+    if (!currentSubscription || !selectedPlanId) return
+    
     setLoading(true)
     setError(null)
     setSuccess(null)
     
     try {
-      if (currentSubscription) {
-        // Update existing subscription to new plan
-        const response = await fetch(`/api/v1/subscriptions/${currentSubscription.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${(session as any)?.accessToken}`,
-          },
-          body: JSON.stringify({ plan_id: planId }),
-        })
-        
-        if (response.ok) {
-          const updated = await response.json()
-          setCurrentSubscription(updated)
-          setSuccess('Plan changed successfully')
-        } else {
-          throw new Error('Failed to update subscription plan')
-        }
-      } else {
-        // Create new subscription
-        const response = await fetch('/api/v1/subscriptions/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${(session as any)?.accessToken}`,
-          },
-          body: JSON.stringify({ plan_id: planId }),
-        })
-        
-        if (response.ok) {
-          router.push('/dashboard')
-        } else {
-          throw new Error('Failed to create subscription')
-        }
-      }
+      const updated = await subscriptionApi.updateSubscription(session, currentSubscription.id, { plan_id: selectedPlanId })
+      setCurrentSubscription(updated)
+      setSuccess('Plan changed successfully! You will see the prorated charge/credit on your next invoice.')
+      setShowPlanChangePreview(false)
+      setPlanChangePreview(null)
+      setSelectedPlanId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription')
     } finally {
@@ -170,36 +171,19 @@ export default function SubscriptionPage() {
     }
   }
 
-  const handleUpdateSubscription = async (status: string) => {
-    if (!currentSubscription || !session?.user) return
-    
-    setLoading(true)
-    setError(null)
-    setSuccess(null)
-    
-    try {
-      const response = await fetch(`/api/v1/subscriptions/${currentSubscription.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(session as any)?.accessToken}`,
-        },
-        body: JSON.stringify({ status }),
-      })
-      
-      if (response.ok) {
-        const updated = await response.json()
-        setCurrentSubscription(updated)
-        setSuccess(`Subscription ${status} successfully`)
-      } else {
-        throw new Error('Failed to update subscription status')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update subscription')
-    } finally {
-      setLoading(false)
-    }
+  const handlePaymentSuccess = () => {
+    setShowPaymentSetup(false)
+    setSelectedPlanId(null)
+    setSuccess('Subscription created successfully!')
+    // Reload page data
+    window.location.reload()
   }
+
+  const handlePaymentCancel = () => {
+    setShowPaymentSetup(false)
+    setSelectedPlanId(null)
+  }
+
 
   const handleCancelSubscription = async () => {
     if (!currentSubscription || !session?.user) return
@@ -221,8 +205,9 @@ export default function SubscriptionPage() {
       })
       
       if (response.ok) {
-        setCurrentSubscription(null)
-        setSuccess('Subscription cancelled successfully')
+        const cancelledSubscription = await response.json()
+        setCurrentSubscription(cancelledSubscription)
+        setSuccess('Subscription cancelled successfully. Benefits will continue until the end of your current billing period.')
       } else {
         throw new Error('Failed to cancel subscription')
       }
@@ -253,30 +238,45 @@ export default function SubscriptionPage() {
     }
   }
 
-  // Helper function to determine if a plan is popular (Weekly Standard)
+  // Helper function to determine if a plan is popular (Family Fresh)
   const isPlanPopular = (plan: SubscriptionPlan) => {
-    return plan.name === 'Weekly Standard'
+    return plan.name === 'Family Fresh'
+  }
+
+  // Helper function to calculate savings vs pay-as-you-go
+  const calculateSavings = (plan: SubscriptionPlan) => {
+    const payAsYouGoPrice = plan.pickups_per_month * 30 // $30 per standard bag
+    const monthlySubPrice = plan.price_per_month
+    const monthlySavings = payAsYouGoPrice - monthlySubPrice
+    const yearlySavings = monthlySavings * 12
+    
+    return {
+      payAsYouGoPrice,
+      monthlySavings,
+      yearlySavings
+    }
   }
 
   // Helper function to get plan features based on plan details
   const getPlanFeatures = (plan: SubscriptionPlan) => {
     const baseFeatures = [
-      `${plan.pickups_per_month} bags per month ($45 value each)`,
-      'Pickup & delivery included',
-      'Professional wash & fold',
-      'Eco-friendly detergents',
+      `${plan.pickups_per_month} Standard Bag pickup${plan.pickups_per_month > 1 ? 's' : ''} per month`,
+      `Up to ${plan.pickups_per_month * 2} loads total`,
+      'Free delivery & pickup',
+      'Priority scheduling'
     ]
 
-    if (plan.name.includes('Weekly')) {
-      baseFeatures.push('24-hour turnaround', 'Priority support')
-      if (plan.name.includes('Standard')) {
-        baseFeatures.splice(1, 0, 'Save $10/month vs pay-per-bag')
-      }
-    } else {
-      baseFeatures.push('48-hour turnaround')
+    if (plan.name === 'Fresh Start') {
+      baseFeatures.push('Extra bags: $30 each')
+      baseFeatures.push('Perfect for: Students, singles, light laundry users')
+    } else if (plan.name === 'Family Fresh') {
+      baseFeatures.push('Extra bags: $30 each')
+      baseFeatures.push('Perfect for: Small to medium families')
+    } else if (plan.name === 'House Fresh') {
+      baseFeatures.push('Extra bags: $30 each')
+      baseFeatures.push('Perfect for: Large families, busy households')
     }
 
-    baseFeatures.push('Add sensitive skin detergent +$3', 'Add scent booster +$3')
     return baseFeatures
   }
 
@@ -297,12 +297,97 @@ export default function SubscriptionPage() {
   return (
     <>
       <PageHeader 
-        title={currentSubscription ? 'Manage Your Subscription' : 'Choose Your Subscription'}
+        title={currentSubscription ? 'Manage Your Subscription' : 'Fresh Laundry Plans'}
         subtitle={currentSubscription 
           ? 'Update your plan status or explore other subscription options.'
-          : 'Select the perfect plan for your laundry needs. All plans include pickup, delivery, and professional care.'
+          : 'Choose the perfect plan for your laundry needs. Fresh Laundry. Fresh Start. Fresh Service.'
         }
       />
+
+        {/* Payment Setup Modal */}
+        <SubscriptionPaymentModal
+          planId={selectedPlanId || 0}
+          isOpen={showPaymentSetup && selectedPlanId !== null}
+          onSuccess={handlePaymentSuccess}
+          onCancel={handlePaymentCancel}
+        />
+
+        {/* Plan Change Preview Modal */}
+        {showPlanChangePreview && planChangePreview && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-8 max-w-md w-full">
+              <h3 className="text-xl font-bold text-slate-900 mb-4">Confirm Plan Change</h3>
+              
+              <div className="space-y-4 mb-6">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Current Plan:</span>
+                  <span className="font-medium">{planChangePreview.current_plan?.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">New Plan:</span>
+                  <span className="font-medium text-teal-600">{planChangePreview.new_plan?.name}</span>
+                </div>
+                
+                {planChangePreview.immediate_charge > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Added to Next Bill:</span>
+                    <span className="font-medium text-red-600">+${planChangePreview.immediate_charge.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {planChangePreview.immediate_credit > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Next Bill Discount:</span>
+                    <span className="font-medium text-green-600">-${planChangePreview.immediate_credit.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Next Billing:</span>
+                  <span className="font-medium">${planChangePreview.new_plan?.price_per_month}/month</span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Renewal Date:</span>
+                  <span className="font-medium">{new Date(planChangePreview.new_billing_date).toLocaleDateString()}</span>
+                </div>
+              </div>
+              
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-slate-700">{planChangePreview.proration_description}</p>
+              </div>
+              
+              {planChangePreview.requires_payment_method && planChangePreview.proration_description.includes('⚠️') && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+                  <p className="text-sm text-orange-700">
+                    Please add a payment method before upgrading to a higher plan.
+                  </p>
+                </div>
+              )}
+              
+              <div className="flex space-x-3">
+                <TumbleButton
+                  onClick={() => {
+                    setShowPlanChangePreview(false)
+                    setPlanChangePreview(null)
+                    setSelectedPlanId(null)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
+                </TumbleButton>
+                <TumbleButton
+                  onClick={confirmPlanChange}
+                  disabled={loading || (planChangePreview.requires_payment_method && planChangePreview.proration_description.includes('⚠️'))}
+                  className="flex-1"
+                >
+                  {loading ? 'Processing...' : 'Confirm Change'}
+                </TumbleButton>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Current Subscription Management */}
         {currentSubscription && (
@@ -316,7 +401,7 @@ export default function SubscriptionPage() {
                 <div className="flex items-center mb-4">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                     currentSubscription.status === 'active' ? 'bg-emerald-100 text-emerald-800' :
-                    currentSubscription.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                    currentSubscription.status === 'cancelled' ? 'bg-orange-100 text-orange-800' :
                     'bg-red-100 text-red-800'
                   }`}>
                     {currentSubscription.status.charAt(0).toUpperCase() + currentSubscription.status.slice(1)}
@@ -327,34 +412,29 @@ export default function SubscriptionPage() {
               <div className="space-y-3">
                 {currentSubscription.status === 'active' && (
                   <TumbleButton
-                    onClick={() => handleUpdateSubscription('paused')}
+                    onClick={handleCancelSubscription}
                     disabled={loading}
-                    variant="outline"
-                    className="w-full border-yellow-500 text-yellow-600 hover:bg-yellow-50"
-                  >
-                    {loading ? 'Processing...' : 'Pause Subscription'}
-                  </TumbleButton>
-                )}
-                
-                {currentSubscription.status === 'paused' && (
-                  <TumbleButton
-                    onClick={() => handleUpdateSubscription('active')}
-                    disabled={loading}
-                    variant="default"
+                    variant="destructive"
                     className="w-full"
                   >
-                    {loading ? 'Processing...' : 'Resume Subscription'}
+                    {loading ? 'Processing...' : 'Cancel Subscription'}
                   </TumbleButton>
                 )}
                 
-                <TumbleButton
-                  onClick={handleCancelSubscription}
-                  disabled={loading}
-                  variant="destructive"
-                  className="w-full"
-                >
-                  {loading ? 'Processing...' : 'Cancel Subscription'}
-                </TumbleButton>
+                {currentSubscription.status === 'cancelled' && (
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                    <p className="text-orange-800 text-sm font-medium">
+                      Subscription Cancelled
+                    </p>
+                    <p className="text-orange-700 text-sm mt-1">
+                      Your benefits will continue until {new Date(currentSubscription.current_period_end).toLocaleDateString('en-US', { 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                      })}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
             
@@ -441,118 +521,185 @@ export default function SubscriptionPage() {
           </div>
         )}
 
-        {/* Plans Grid */}
-        <div className="grid md:grid-cols-2 gap-8 mb-12">
-          {plans.filter(plan => plan.is_active).map((plan) => {
+        {/* Plans Grid - Hide for cancelled subscriptions */}
+        {(!currentSubscription || currentSubscription.status !== 'cancelled') && (
+          <div className="grid md:grid-cols-3 gap-6 mb-12">
+            {plans.filter(plan => plan.is_active).map((plan) => {
             const popular = isPlanPopular(plan)
             const features = getPlanFeatures(plan)
-            const frequency = plan.name.includes('Weekly') ? 'weekly' : 'bi-weekly'
+            const savings = calculateSavings(plan)
+            const isCurrentPlan = currentSubscription?.plan_id === plan.id
 
             return (
               <div
                 key={plan.id}
-                className={`bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all border-2 ${
-                  popular ? 'border-teal-200' : 'border-slate-200'
+                className={`bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all border-2 ${
+                  isCurrentPlan ? 'border-emerald-300 bg-emerald-50 ring-2 ring-emerald-200' :
+                  popular ? 'border-teal-400 bg-gradient-to-br from-teal-50 to-emerald-50 ring-2 ring-teal-200' : 
+                  'border-slate-200'
                 } relative`}
               >
-                {popular && (
-                  <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                    <span className="bg-gradient-to-r from-teal-500 to-emerald-500 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
-                      MOST POPULAR
+                {isCurrentPlan && (
+                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    <span className="bg-emerald-500 text-white px-4 py-1 rounded-full text-sm font-medium">
+                      Current Plan
+                    </span>
+                  </div>
+                )}
+                
+                {popular && !isCurrentPlan && (
+                  <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                    <span className="bg-teal-500 text-white px-4 py-1 rounded-full text-sm font-medium">
+                      Most Popular
                     </span>
                   </div>
                 )}
 
-                <div className="flex items-center mb-6">
-                  <Calendar className={`w-6 h-6 ${popular ? 'text-emerald-500' : 'text-teal-500'} mr-3`} />
-                  <h3 className="text-2xl font-bold text-slate-800">{plan.name}</h3>
+                <div className="text-center">
+                  <div className="flex items-center justify-center mb-3">
+                    {plan.name === 'Fresh Start' && <span className="text-2xl mr-2">🌱</span>}
+                    {plan.name === 'Family Fresh' && <span className="text-2xl mr-2">🏡</span>}
+                    {plan.name === 'House Fresh' && <span className="text-2xl mr-2">🏠</span>}
+                    <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
+                  </div>
+                  
+                  {plan.name === 'Fresh Start' && (
+                    <p className="text-slate-600 text-sm mb-4">Perfect for singles and students</p>
+                  )}
+                  {plan.name === 'Family Fresh' && (
+                    <p className="text-slate-600 text-sm mb-4">Great for small families - Most Popular</p>
+                  )}
+                  {plan.name === 'House Fresh' && (
+                    <p className="text-slate-600 text-sm mb-4">Ideal for large families and busy households</p>
+                  )}
+
+                  <div className="text-3xl font-bold text-teal-600 mb-4">
+                    ${plan.price_per_month}
+                    <span className="text-lg text-slate-500 font-normal">/month</span>
+                  </div>
+
+                  {/* Savings vs Pay-as-you-go */}
+                  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-3 mb-6">
+                    <div className="text-center">
+                      <div className="text-sm text-slate-600 mb-1">Pay-as-you-go would cost:</div>
+                      <div className="text-lg font-semibold text-slate-800 line-through">${savings.payAsYouGoPrice}/month</div>
+                      <div className="text-sm font-bold text-emerald-600">
+                        💰 Save ${savings.monthlySavings}/month (${savings.yearlySavings}/year)
+                      </div>
+                    </div>
+                  </div>
+
+                  <ul className="text-left space-y-2 mb-6">
+                    {features.map((feature, index) => (
+                      <li key={index} className="flex items-start">
+                        <CheckCircle className={`w-4 h-4 ${popular ? 'text-emerald-500' : 'text-teal-500'} mr-2 flex-shrink-0 mt-0.5`} />
+                        <span className="text-slate-700 text-sm">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <TumbleButton
+                    onClick={() => handleSubscribe(plan.id)}
+                    disabled={loading || isCurrentPlan || previewLoading}
+                    variant={isCurrentPlan ? "outline" : "default"}
+                    className={`w-full ${isCurrentPlan ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50' : ''}`}
+                  >
+                    {(loading || previewLoading) ? 'Processing...' : 
+                     isCurrentPlan ? '✓ Active Plan' :
+                     currentSubscription ? 'Switch to This Plan' : 'Choose This Plan'}
+                  </TumbleButton>
                 </div>
-
-                <div className="text-4xl font-bold text-slate-900 mb-2">
-                  ${plan.price_per_month}
-                  <span className="text-lg text-slate-500 font-normal">/month</span>
-                </div>
-
-                <p className="text-slate-600 mb-6">
-                  {plan.pickups_per_month} bags per month ({frequency} pickup)
-                </p>
-
-                <ul className="space-y-3 mb-8">
-                  {features.map((feature, index) => (
-                    <li key={index} className="flex items-start">
-                      <CheckCircle className={`w-5 h-5 ${popular ? 'text-emerald-500' : 'text-teal-500'} mr-3 flex-shrink-0 mt-0.5`} />
-                      <span className="text-slate-600 text-sm">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <TumbleButton
-                  onClick={() => handleSubscribe(plan.id)}
-                  disabled={loading || (currentSubscription?.plan_id === plan.id)}
-                  variant={currentSubscription?.plan_id === plan.id ? "secondary" : "default"}
-                  className="w-full"
-                >
-                  {loading ? 'Processing...' : 
-                   currentSubscription?.plan_id === plan.id ? 'Current Plan' :
-                   currentSubscription ? 'Switch to Plan' : 'Select Plan'}
-                </TumbleButton>
               </div>
             )
           })}
-        </div>
+          </div>
+        )}
 
-        {/* Additional Options */}
-        <div className="bg-white rounded-2xl p-8 shadow-lg">
-          <div className="flex items-center mb-4">
+        {/* Cancelled Subscription Notice */}
+        {currentSubscription && currentSubscription.status === 'cancelled' && (
+          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-8 mb-12">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <svg className="h-6 w-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-orange-800">Subscription Cancelled</h3>
+                <div className="mt-2 text-sm text-orange-700">
+                  <p>Your subscription has been cancelled and will end on {new Date(currentSubscription.current_period_end).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}.</p>
+                  <p className="mt-1">You cannot change plans while your subscription is cancelled. To select a different plan, you'll need to wait until your current subscription ends and then subscribe again.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pay-as-You-Go vs Subscription Comparison */}
+        <div className="bg-white rounded-2xl p-8 shadow-lg mb-8">
+          <div className="flex items-center mb-6">
             <Package className="w-6 h-6 text-teal-500 mr-3" />
-            <h3 className="text-xl font-bold text-slate-800">Additional Services & Pricing</h3>
+            <h3 className="text-xl font-bold text-slate-800">Pay-as-You-Go Pricing</h3>
           </div>
           
-          <div className="grid gap-4 mb-6">
-            <div className="flex justify-between items-center py-3 border-b border-slate-100">
-              <div>
-                <h4 className="font-semibold text-slate-800">Additional Standard Bags</h4>
-                <p className="text-sm text-slate-600">Add extra bags to any order</p>
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 mb-6">
+            <h4 className="font-semibold text-slate-900 mb-4">Standard Service (No Subscription)</h4>
+            <div className="grid gap-3">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Standard Bag (22"×33", ~2 loads)</span>
+                <span className="font-bold text-slate-900">$30 each</span>
               </div>
-              <span className="font-bold text-slate-900">$40/bag</span>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Rush Service (+faster turnaround)</span>
+                <span className="font-bold text-slate-900">+$10 each</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Additional bags</span>
+                <span className="font-bold text-slate-900">$30 each</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Sensitive Skin Detergent</span>
+                <span className="font-bold text-slate-900">+$3/order</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Scent Booster</span>
+                <span className="font-bold text-slate-900">+$3/order</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-700">Bedding</span>
+                <span className="font-bold text-slate-900">$25/item</span>
+              </div>
             </div>
-            
-            <div className="flex justify-between items-center py-3 border-b border-slate-100">
-              <div>
-                <h4 className="font-semibold text-slate-800">Rush Service</h4>
-                <p className="text-sm text-slate-600">24-hour turnaround for urgent needs</p>
-              </div>
-              <span className="font-bold text-slate-900">$55/bag</span>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 border border-red-200 rounded-lg p-4 text-center">
+              <div className="text-lg font-bold text-red-700 mb-1">2 Bags/Month</div>
+              <div className="text-2xl font-bold text-red-800">$90</div>
+              <div className="text-sm text-red-600">vs Fresh Start: $48</div>
+              <div className="text-xs font-semibold text-red-700 mt-1">You'd pay $42 more!</div>
             </div>
-            
-            <div className="flex justify-between items-center py-3 border-b border-slate-100">
-              <div>
-                <h4 className="font-semibold text-slate-800">Sensitive Skin Detergent</h4>
-                <p className="text-sm text-slate-600">Hypoallergenic option for sensitive skin</p>
-              </div>
-              <span className="font-bold text-slate-900">+$3/order</span>
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 border border-red-200 rounded-lg p-4 text-center">
+              <div className="text-lg font-bold text-red-700 mb-1">6 Bags/Month</div>
+              <div className="text-2xl font-bold text-red-800">$270</div>
+              <div className="text-sm text-red-600">vs Family Fresh: $130</div>
+              <div className="text-xs font-semibold text-red-700 mt-1">You'd pay $140 more!</div>
             </div>
-            
-            <div className="flex justify-between items-center py-3 border-b border-slate-100">
-              <div>
-                <h4 className="font-semibold text-slate-800">Scent Booster</h4>
-                <p className="text-sm text-slate-600">Extra fresh scent for your laundry</p>
-              </div>
-              <span className="font-bold text-slate-900">+$3/order</span>
-            </div>
-            
-            <div className="flex justify-between items-center py-3">
-              <div>
-                <h4 className="font-semibold text-slate-800">Comforter Cleaning</h4>
-                <p className="text-sm text-slate-600">Professional cleaning for bedding</p>
-              </div>
-              <span className="font-bold text-slate-900">$25/item</span>
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 border border-red-200 rounded-lg p-4 text-center">
+              <div className="text-lg font-bold text-red-700 mb-1">12 Bags/Month</div>
+              <div className="text-2xl font-bold text-red-800">$540</div>
+              <div className="text-sm text-red-600">vs House Fresh: $240</div>
+              <div className="text-xs font-semibold text-red-700 mt-1">You'd pay $300 more!</div>
             </div>
           </div>
           
-          <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-            <p className="text-sm text-teal-700">
-              <strong>Pro tip:</strong> Subscription plans offer the best value! Weekly subscribers save $10/month compared to pay-per-bag pricing.
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+            <p className="text-sm text-emerald-700 text-center">
+              <strong>💡 Smart choice:</strong> Subscription plans include free pickup & delivery, priority scheduling, and massive savings compared to pay-as-you-go!
             </p>
           </div>
         </div>
@@ -562,24 +709,47 @@ export default function SubscriptionPage() {
           <h2 className="text-2xl font-bold text-slate-900 mb-8">Frequently Asked Questions</h2>
           <div className="grid gap-6 text-left">
             <div className="bg-white rounded-lg p-6 shadow">
-              <h3 className="font-semibold text-slate-800 mb-2">What&apos;s included in a standard bag?</h3>
+              <h3 className="font-semibold text-slate-800 mb-2">What&apos;s included in a Standard Bag?</h3>
               <p className="text-slate-600 text-sm">
-                A standard bag holds approximately 15-20 lbs of laundry, equivalent to about 
-                2-3 loads in a home washing machine. Each bag is valued at $45 when purchased individually.
+                A Standard Bag (22"×33") holds approximately 15-20 lbs of laundry, equivalent to about 
+                2 loads in a home washing machine. Each bag costs $45 when purchased pay-as-you-go (includes pickup & delivery).
               </p>
             </div>
             <div className="bg-white rounded-lg p-6 shadow">
-              <h3 className="font-semibold text-slate-800 mb-2">Can I pause or cancel my subscription?</h3>
+              <h3 className="font-semibold text-slate-800 mb-2">How much do I save with a subscription?</h3>
               <p className="text-slate-600 text-sm">
-                Yes! You can pause or cancel your subscription anytime from your dashboard. 
+                Subscriptions offer significant savings! Fresh Start saves you $42/month ($504/year), 
+                Family Fresh saves $140/month ($1,680/year), and House Fresh saves $300/month ($3,600/year) 
+                compared to pay-as-you-go pricing of $45 per Standard Bag.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow">
+              <h3 className="font-semibold text-slate-800 mb-2">What if I need extra bags beyond my subscription?</h3>
+              <p className="text-slate-600 text-sm">
+                No problem! Extra bags are available for $40 each, discounted from the $45 pay-as-you-go price. 
+                Your subscription covers your monthly allowance, and you only pay for additional bags when needed.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow">
+              <h3 className="font-semibold text-slate-800 mb-2">Can I cancel my subscription?</h3>
+              <p className="text-slate-600 text-sm">
+                Yes! You can cancel your subscription anytime from your dashboard. 
+                Your benefits will continue until the end of your current billing period. 
                 No long-term commitments required.
               </p>
             </div>
             <div className="bg-white rounded-lg p-6 shadow">
-              <h3 className="font-semibold text-slate-800 mb-2">When will my first pickup be scheduled?</h3>
+              <h3 className="font-semibold text-slate-800 mb-2">Do subscription plans include pickup and delivery?</h3>
               <p className="text-slate-600 text-sm">
-                After subscribing, you can schedule your first pickup for any available slot 
-                starting from the next business day.
+                Yes! All subscription plans include free pickup and delivery, plus priority scheduling. 
+                Pay-as-you-go customers pay standard rates for both service and delivery.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-6 shadow">
+              <h3 className="font-semibold text-slate-800 mb-2">What happens to unused pickups at the end of the month?</h3>
+              <p className="text-slate-600 text-sm">
+                Unused pickups don't roll over to the next month - they expire at month-end. 
+                We recommend using all your monthly allowance to get the most value from your subscription.
               </p>
             </div>
           </div>

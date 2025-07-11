@@ -288,7 +288,7 @@ func (s *AutoScheduler) createOrder(user ScheduleableUser, pickupDate, deliveryD
 		return 0, err
 	}
 	
-	tax = subtotal * 0.08 // 8% tax
+	tax = subtotal * 0.06 // 6% tax
 	total = subtotal + tax
 	
 	// Update order totals

@@ -71,15 +71,11 @@ func (h *DriverEarningsHandler) handleGetDriverEarnings(w http.ResponseWriter, r
 		return
 	}
 
-	// Calculate earnings based on completed route orders with DoorDash-style model
+	// Calculate earnings based on completed route orders with 70% commission
 	earnings := &EarningsData{}
 
-	// Earnings components for laundry service
-	const pickupBasePay = 5.00        // Base pay per pickup
-	const deliveryBasePay = 5.00      // Base pay per delivery  
-	const commissionRate = 0.10       // 10% of order value
-	const rushOrderBonus = 3.00       // Bonus for rush orders ($55 vs $45)
-	const heavyLoadBonus = 2.00       // Bonus for bedding/comforters
+	// Simple 70% commission structure
+	const driverCommissionRate = 0.70 // 70% of order value
 
 	// Get today's earnings
 	todayEarnings := h.calculateEarningsForPeriod(driverID, "today")
@@ -129,9 +125,7 @@ func (h *DriverEarningsHandler) calculateEarningsForPeriod(driverID int, period 
 
 	query := fmt.Sprintf(`
 		SELECT 
-			COUNT(ro.id) as delivery_count,
-			COALESCE(SUM(o.total), 0) as order_value_total,
-			COALESCE(SUM(o.tip), 0) as tips_total
+			COALESCE(SUM(o.total), 0) as order_value_total
 		FROM route_orders ro
 		JOIN driver_routes dr ON ro.route_id = dr.id
 		JOIN orders o ON ro.order_id = o.id
@@ -140,33 +134,23 @@ func (h *DriverEarningsHandler) calculateEarningsForPeriod(driverID int, period 
 		AND %s
 	`, dateCondition)
 
-	var deliveryCount int
-	var orderValueTotal, tipsTotal float64
+	var orderValueTotal float64
 	
-	err := h.db.QueryRow(query, driverID).Scan(&deliveryCount, &orderValueTotal, &tipsTotal)
+	err := h.db.QueryRow(query, driverID).Scan(&orderValueTotal)
 	if err != nil && err != sql.ErrNoRows {
 		return 0.0
 	}
 
-	// Laundry service earnings calculation
-	// For pickup routes: $5 per pickup + 10% commission + bonuses
-	// For delivery routes: $5 per delivery + tips + bonuses
-	basePay := float64(deliveryCount) * 5.00                   // $5 base per pickup/delivery
-	commission := orderValueTotal * 0.10                       // 10% of order value
-	tips := tipsTotal                                          // Customer tips
-	rushBonus := h.calculateRushOrderBonus(driverID, period)  // Rush order bonuses
-	heavyLoadBonus := h.calculateHeavyLoadBonus(driverID, period) // Bedding/comforter bonuses
-
-	return basePay + commission + tips + rushBonus + heavyLoadBonus
+	// Simple 70% commission of total order value
+	return orderValueTotal * 0.70
 }
 
 // calculateTotalEarnings calculates total lifetime earnings
 func (h *DriverEarningsHandler) calculateTotalEarnings(driverID int) (float64, int) {
 	query := `
 		SELECT 
-			COUNT(ro.id) as delivery_count,
-			COALESCE(SUM(o.total), 0) as order_value_total,
-			COALESCE(SUM(o.tip), 0) as tips_total
+			COUNT(ro.id) as order_count,
+			COALESCE(SUM(o.total), 0) as order_value_total
 		FROM route_orders ro
 		JOIN driver_routes dr ON ro.route_id = dr.id
 		JOIN orders o ON ro.order_id = o.id
@@ -174,96 +158,19 @@ func (h *DriverEarningsHandler) calculateTotalEarnings(driverID int) (float64, i
 		AND ro.status = 'completed'
 	`
 
-	var deliveryCount int
-	var orderValueTotal, tipsTotal float64
+	var orderCount int
+	var orderValueTotal float64
 	
-	err := h.db.QueryRow(query, driverID).Scan(&deliveryCount, &orderValueTotal, &tipsTotal)
+	err := h.db.QueryRow(query, driverID).Scan(&orderCount, &orderValueTotal)
 	if err != nil && err != sql.ErrNoRows {
 		return 0.0, 0
 	}
 
-	// Calculate total earnings with all components
-	basePay := float64(deliveryCount) * 5.00
-	commission := orderValueTotal * 0.10
-	tips := tipsTotal
-	rushBonus := h.calculateRushOrderBonus(driverID, "all")
-	heavyLoadBonus := h.calculateHeavyLoadBonus(driverID, "all")
-
-	totalEarnings := basePay + commission + tips + rushBonus + heavyLoadBonus
-	return totalEarnings, deliveryCount
+	// Simple 70% commission of total order value
+	totalEarnings := orderValueTotal * 0.70
+	return totalEarnings, orderCount
 }
 
-// calculateRushOrderBonus calculates bonuses for rush orders ($55 vs $45)
-func (h *DriverEarningsHandler) calculateRushOrderBonus(driverID int, period string) float64 {
-	var dateCondition string
-	switch period {
-	case "today":
-		dateCondition = "DATE(dr.route_date) = CURRENT_DATE"
-	case "week":
-		dateCondition = "DATE(dr.route_date) >= DATE_TRUNC('week', CURRENT_DATE)"
-	case "month":
-		dateCondition = "DATE(dr.route_date) >= DATE_TRUNC('month', CURRENT_DATE)"
-	default:
-		dateCondition = "TRUE" // All time
-	}
-
-	// Count orders with rush pricing (total >= $55 for single bag, indicating rush service)
-	query := fmt.Sprintf(`
-		SELECT COUNT(ro.id) as rush_orders
-		FROM route_orders ro
-		JOIN driver_routes dr ON ro.route_id = dr.id
-		JOIN orders o ON ro.order_id = o.id
-		WHERE dr.driver_id = $1 
-		AND ro.status = 'completed'
-		AND o.total >= 55.00
-		AND %s
-	`, dateCondition)
-
-	var rushOrders float64
-	err := h.db.QueryRow(query, driverID).Scan(&rushOrders)
-	if err != nil {
-		return 0.0
-	}
-
-	return rushOrders * 3.00 // $3 bonus for rush orders
-}
-
-// calculateHeavyLoadBonus calculates bonuses for bedding/comforter orders
-func (h *DriverEarningsHandler) calculateHeavyLoadBonus(driverID int, period string) float64 {
-	var dateCondition string
-	switch period {
-	case "today":
-		dateCondition = "DATE(dr.route_date) = CURRENT_DATE"
-	case "week":
-		dateCondition = "DATE(dr.route_date) >= DATE_TRUNC('week', CURRENT_DATE)"
-	case "month":
-		dateCondition = "DATE(dr.route_date) >= DATE_TRUNC('month', CURRENT_DATE)"
-	default:
-		dateCondition = "TRUE" // All time
-	}
-
-	// Look for orders with special instructions mentioning bedding or high total values indicating comforters
-	query := fmt.Sprintf(`
-		SELECT COUNT(ro.id) as heavy_orders
-		FROM route_orders ro
-		JOIN driver_routes dr ON ro.route_id = dr.id
-		JOIN orders o ON ro.order_id = o.id
-		WHERE dr.driver_id = $1 
-		AND ro.status = 'completed'
-		AND (o.special_instructions ILIKE '%%bedding%%' 
-		     OR o.special_instructions ILIKE '%%comforter%%'
-		     OR o.total >= 70.00)
-		AND %s
-	`, dateCondition)
-
-	var heavyOrders float64
-	err := h.db.QueryRow(query, driverID).Scan(&heavyOrders)
-	if err != nil {
-		return 0.0
-	}
-
-	return heavyOrders * 2.00 // $2 bonus for heavy/bulky loads
-}
 
 // calculateActualHoursWorked calculates total hours worked based on actual route times
 func (h *DriverEarningsHandler) calculateActualHoursWorked(driverID int) float64 {
@@ -394,17 +301,14 @@ func (h *DriverEarningsHandler) handleGetDriverEarningsHistory(w http.ResponseWr
 		daysBack = 7
 	}
 
-	// Laundry service rates
-	const basePayPerDelivery = 5.00
-	const commissionRate = 0.10
-	const estimatedHoursPerDelivery = 0.75 // 45 minutes including drive time
+	// Simple 70% commission structure
+	const driverCommissionRate = 0.70
 
 	query := `
 		SELECT 
 			DATE(dr.route_date) as work_date,
-			COUNT(ro.id) as completed_deliveries,
-			COALESCE(SUM(o.total), 0) as order_value_total,
-			COALESCE(SUM(o.tip), 0) as tips_total
+			COUNT(ro.id) as completed_orders,
+			COALESCE(SUM(o.total), 0) as order_value_total
 		FROM route_orders ro
 		JOIN driver_routes dr ON ro.route_id = dr.id
 		JOIN orders o ON ro.order_id = o.id
@@ -427,31 +331,23 @@ func (h *DriverEarningsHandler) handleGetDriverEarningsHistory(w http.ResponseWr
 	history := []EarningsHistory{}
 	for rows.Next() {
 		var workDate time.Time
-		var completedDeliveries int
-		var orderValueTotal, tipsTotal float64
+		var completedOrders int
+		var orderValueTotal float64
 
-		err := rows.Scan(&workDate, &completedDeliveries, &orderValueTotal, &tipsTotal)
+		err := rows.Scan(&workDate, &completedOrders, &orderValueTotal)
 		if err != nil {
 			continue
 		}
 
-		// Calculate laundry-specific earnings for this day
-		basePay := float64(completedDeliveries) * basePayPerDelivery
-		commission := orderValueTotal * commissionRate
-		tips := tipsTotal
-		
-		// Simplified bonuses for daily view (could be enhanced)
-		rushBonus := orderValueTotal * 0.02  // Estimate 2% of order value as rush bonuses
-		heavyLoadBonus := float64(completedDeliveries) * 0.20 // Estimate $0.20 per delivery for heavy loads
-
-		totalEarnings := basePay + commission + tips + rushBonus + heavyLoadBonus
+		// Simple 70% commission of order value
+		totalEarnings := orderValueTotal * driverCommissionRate
 		
 		// Calculate hours for this specific date
 		hours := h.calculateHoursForDate(driverID, workDate.Format("2006-01-02"))
 
 		history = append(history, EarningsHistory{
 			Date:     workDate.Format("2006-01-02"),
-			Orders:   completedDeliveries,
+			Orders:   completedOrders,
 			Earnings: totalEarnings,
 			Hours:    hours,
 		})

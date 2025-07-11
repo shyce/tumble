@@ -56,16 +56,16 @@ func TestSubscriptionHandler_GetPlans(t *testing.T) {
 			t.Error("Expected plan to have pickups_per_month")
 		}
 
-		// Verify pricing matches README specs
+		// Verify pricing matches new PRICING.md specs
 		foundCorrectPricing := false
 		for _, p := range plans {
-			if p.Name == "Weekly Standard" && p.PricePerMonth == 170.0 {
+			if p.Name == "Family Fresh" && p.PricePerMonth == 130.0 {
 				foundCorrectPricing = true
 				break
 			}
 		}
 		if !foundCorrectPricing {
-			t.Error("Expected to find Weekly Standard plan with price $170")
+			t.Error("Expected to find Family Fresh plan with price $130")
 		}
 	}
 }
@@ -76,7 +76,7 @@ func TestSubscriptionHandler_CreateSubscription(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Weekly Standard")
+	planID := db.GetPlanID(t, "Family Fresh")
 
 	// Handler will be created per test with mocked getUserID
 
@@ -159,7 +159,7 @@ func TestSubscriptionHandler_GetSubscription(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Bi-Weekly Standard")
+	planID := db.GetPlanID(t, "Fresh Start")
 	subscriptionID := db.CreateTestSubscription(t, userID, planID)
 
 	// Handler will be created per test with mocked getUserID
@@ -229,7 +229,7 @@ func TestSubscriptionHandler_UpdateSubscription(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Weekly Standard")
+	planID := db.GetPlanID(t, "Family Fresh")
 	subscriptionID := db.CreateTestSubscription(t, userID, planID)
 
 	// Handler will be created per test with mocked getUserID
@@ -318,7 +318,7 @@ func TestSubscriptionHandler_CancelSubscription(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Weekly Standard")
+	planID := db.GetPlanID(t, "Family Fresh")
 	subscriptionID := db.CreateTestSubscription(t, userID, planID)
 
 	// Handler will be created per test with mocked getUserID
@@ -398,7 +398,7 @@ func TestSubscriptionHandler_GetUsage(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Weekly Standard")
+	planID := db.GetPlanID(t, "Family Fresh")
 	subscriptionID := db.CreateTestSubscription(t, userID, planID)
 	addressID := db.CreateTestAddress(t, userID)
 
@@ -513,7 +513,7 @@ func TestSubscriptionHandler_PreventDuplicateSubscription(t *testing.T) {
 
 	// Create test data
 	userID := db.CreateTestUser(t, "test@example.com", "Test", "User")
-	planID := db.GetPlanID(t, "Weekly Standard")
+	planID := db.GetPlanID(t, "Family Fresh")
 	
 	// Create first subscription
 	db.CreateTestSubscription(t, userID, planID)

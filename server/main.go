@@ -23,21 +23,21 @@ var (
 )
 
 type Server struct {
-	db       *sql.DB
-	redis    *redis.Client
-	centNode *centrifuge.Node
-	realtime *RealtimeHandler
-	auth     *AuthHandler
-	orders   *OrderHandler
-	subscriptions *SubscriptionHandler
-	addresses *AddressHandler
-	services *ServiceHandler
-	admin    *AdminHandler
-	payments *PaymentHandler
-	driverApps *DriverApplicationHandler
-	driverRoutes *DriverRouteHandler
+	db             *sql.DB
+	redis          *redis.Client
+	centNode       *centrifuge.Node
+	realtime       *RealtimeHandler
+	auth           *AuthHandler
+	orders         *OrderHandler
+	subscriptions  *SubscriptionHandler
+	addresses      *AddressHandler
+	services       *ServiceHandler
+	admin          *AdminHandler
+	payments       *PaymentHandler
+	driverApps     *DriverApplicationHandler
+	driverRoutes   *DriverRouteHandler
 	driverEarnings *DriverEarningsHandler
-	scheduler *AutoScheduler
+	scheduler      *AutoScheduler
 }
 
 type HealthResponse struct {
@@ -53,7 +53,7 @@ type HealthResponse struct {
 func main() {
 	// Initialize structured logging
 	InitLogger()
-	
+
 	server := &Server{}
 
 	// Initialize database connection
@@ -90,14 +90,14 @@ func main() {
 	server.driverApps = NewDriverApplicationHandler(server.db)
 	server.driverRoutes = NewDriverRouteHandler(server.db, server.realtime)
 	server.driverEarnings = NewDriverEarningsHandler(server.db)
-	
+
 	// Initialize and start auto-scheduler
 	server.scheduler = NewAutoScheduler(server.db)
 	server.scheduler.Start()
 
 	// Set up HTTP routes with Gorilla Mux
 	r := mux.NewRouter()
-	
+
 	// Add middleware
 	r.Use(CORSMiddleware)
 	r.Use(LoggingMiddleware)
@@ -124,15 +124,16 @@ func main() {
 	api.HandleFunc("/orders/{id}/status", server.orders.handleUpdateOrderStatus)
 	api.HandleFunc("/orders/{id}/tracking", server.orders.handleGetOrderTracking)
 
-	// Subscription routes
-	api.HandleFunc("/subscriptions/plans", server.subscriptions.handleGetPlans)
-	api.HandleFunc("/subscriptions/current", server.subscriptions.handleGetSubscription)
-	api.HandleFunc("/subscriptions/create", server.subscriptions.handleCreateSubscription)
-	api.HandleFunc("/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage)
+	// Subscription routes (specific routes before wildcard routes)
+	api.HandleFunc("/subscriptions/plans", server.subscriptions.handleGetPlans).Methods("GET")
+	api.HandleFunc("/subscriptions/current", server.subscriptions.handleGetSubscription).Methods("GET")
+	api.HandleFunc("/subscriptions/create", server.subscriptions.handleCreateSubscription).Methods("POST")
+	api.HandleFunc("/subscriptions/usage", server.subscriptions.handleGetSubscriptionUsage).Methods("GET")
+	api.HandleFunc("/subscriptions/preview-change", server.subscriptions.handlePreviewSubscriptionChange).Methods("POST")
 	api.HandleFunc("/subscriptions/preferences", server.subscriptions.handleGetSubscriptionPreferences).Methods("GET")
 	api.HandleFunc("/subscriptions/preferences", server.subscriptions.handleCreateOrUpdateSubscriptionPreferences).Methods("POST", "PUT")
-	api.HandleFunc("/subscriptions/{id}", server.subscriptions.handleUpdateSubscription)
-	api.HandleFunc("/subscriptions/{id}/cancel", server.subscriptions.handleCancelSubscription)
+	api.HandleFunc("/subscriptions/{id}", server.subscriptions.handleUpdateSubscription).Methods("PUT", "PATCH")
+	api.HandleFunc("/subscriptions/{id}/cancel", server.subscriptions.handleCancelSubscription).Methods("POST")
 
 	// Address routes
 	api.HandleFunc("/addresses", server.addresses.handleGetAddresses)
@@ -192,7 +193,7 @@ func main() {
 
 	port := os.Getenv("GO_BACKEND_PORT")
 	if port == "" {
-		port = "8080"
+		port = "8082"
 	}
 
 	log.Printf("Server starting on port %s", port)

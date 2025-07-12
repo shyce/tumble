@@ -267,10 +267,10 @@ func (h *PaymentHandler) handleCreateSubscriptionPayment(w http.ResponseWriter, 
 
 	// Get plan details
 	var planName string
-	var pricePerMonth float64
+	var pricePerMonthCents int
 	err = h.db.QueryRow(`
-		SELECT name, price_per_month FROM subscription_plans WHERE id = $1
-	`, req.PlanID).Scan(&planName, &pricePerMonth)
+		SELECT name, price_per_month_cents FROM subscription_plans WHERE id = $1
+	`, req.PlanID).Scan(&planName, &pricePerMonthCents)
 	
 	if err != nil {
 		http.Error(w, "Invalid plan", http.StatusBadRequest)
@@ -308,8 +308,8 @@ func (h *PaymentHandler) handleCreateSubscriptionPayment(w http.ResponseWriter, 
 		return
 	}
 
-	// Create or get Stripe price
-	priceID, err := h.getOrCreateStripePrice(planName, int64(pricePerMonth*100))
+	// Create or get Stripe price (already in cents)
+	priceID, err := h.getOrCreateStripePrice(planName, int64(pricePerMonthCents))
 	if err != nil {
 		http.Error(w, "Failed to create price", http.StatusInternalServerError)
 		return
@@ -578,8 +578,31 @@ func (h *PaymentHandler) getOrCreateStripeCustomer(userID int) (string, error) {
 		return "", err
 	}
 
-	// Return existing customer ID if available
+	// If customer exists, check if it has an address and update if needed
 	if stripeCustomerID.Valid && stripeCustomerID.String != "" {
+		// Get user's default address
+		var streetAddress, city, state, zipCode sql.NullString
+		err = h.db.QueryRow(`
+			SELECT street_address, city, state, zip_code 
+			FROM addresses 
+			WHERE user_id = $1 AND is_default = true
+			LIMIT 1
+		`, userID).Scan(&streetAddress, &city, &state, &zipCode)
+		
+		// If we have a valid address, update the existing Stripe customer
+		if err == nil && streetAddress.Valid && city.Valid && state.Valid && zipCode.Valid {
+			updateParams := &stripe.CustomerParams{
+				Address: &stripe.AddressParams{
+					Line1:      stripe.String(streetAddress.String),
+					City:       stripe.String(city.String),
+					State:      stripe.String(state.String),
+					PostalCode: stripe.String(zipCode.String),
+					Country:    stripe.String("US"),
+				},
+			}
+			customer.Update(stripeCustomerID.String, updateParams)
+		}
+		
 		return stripeCustomerID.String, nil
 	}
 
@@ -664,21 +687,21 @@ func (h *PaymentHandler) getOrCreateStripePrice(planName string, amountCents int
 		log.Printf("Created new Stripe product: %s (%s) with tax code txcd_20090012", prod.Name, prod.ID)
 	}
 
-	// Look for existing price with the same amount
-	priceSearchParams := &stripe.PriceSearchParams{
-		SearchParams: stripe.SearchParams{
-			Query: `product:"` + prod.ID + `" AND unit_amount:` + fmt.Sprintf("%d", amountCents),
-			Limit: stripe.Int64(1),
-		},
+	// Look for existing price with the same amount using List API
+	priceListParams := &stripe.PriceListParams{
+		Product: stripe.String(prod.ID),
 	}
+	priceListParams.Limit = stripe.Int64(10) // List a few prices to find matching amount
 	
-	priceSearchResult := price.Search(priceSearchParams)
+	priceList := price.List(priceListParams)
 	
-	// If price exists, use it
-	if priceSearchResult.Next() {
-		existingPrice := priceSearchResult.Price()
-		log.Printf("Found existing Stripe price: %s (%s)", existingPrice.ID, fmt.Sprintf("$%.2f", float64(existingPrice.UnitAmount)/100))
-		return existingPrice.ID, nil
+	// Check if any existing price has the same amount
+	for priceList.Next() {
+		existingPrice := priceList.Price()
+		if existingPrice.UnitAmount == amountCents {
+			log.Printf("Found existing Stripe price: %s (%s)", existingPrice.ID, fmt.Sprintf("$%.2f", float64(existingPrice.UnitAmount)/100))
+			return existingPrice.ID, nil
+		}
 	}
 
 	// Create new price
@@ -716,14 +739,13 @@ func (h *PaymentHandler) handlePaymentIntentSucceeded(pi *stripe.PaymentIntent) 
 	// Update order status if this was an order payment
 	if orderIDStr, ok := pi.Metadata["order_id"]; ok {
 		orderID, _ := strconv.Atoi(orderIDStr)
-		h.db.Exec(`
-			UPDATE orders SET status = 'paid' WHERE id = $1
-		`, orderID)
+		// Order remains 'scheduled' after payment - no status change needed
+		// The payment record status indicates payment completion
 		
-		// Send realtime notification
+		// Send realtime notification about payment success
 		if userIDStr, ok := pi.Metadata["user_id"]; ok {
 			userID, _ := strconv.Atoi(userIDStr)
-			h.realtime.PublishOrderUpdate(userID, orderID, "paid", "Payment successful", nil)
+			h.realtime.PublishOrderUpdate(userID, orderID, "scheduled", "Payment successful - pickup confirmed", nil)
 		}
 	}
 }
@@ -858,4 +880,51 @@ func (h *PaymentHandler) handleGetPaymentHistory(w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(payments)
+}
+
+// handleGetPaymentIntent returns payment intent details
+func (h *PaymentHandler) handleGetPaymentIntent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := h.getUserID(r, h.db)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get payment intent ID from URL
+	vars := mux.Vars(r)
+	paymentIntentID := vars["id"]
+
+	// Verify the payment intent belongs to this user
+	var exists bool
+	err = h.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM payments 
+			WHERE user_id = $1 AND stripe_payment_intent_id = $2
+		)
+	`, userID, paymentIntentID).Scan(&exists)
+	
+	if err != nil || !exists {
+		http.Error(w, "Payment intent not found", http.StatusNotFound)
+		return
+	}
+
+	// Get payment intent from Stripe
+	pi, err := paymentintent.Get(paymentIntentID, nil)
+	if err != nil {
+		http.Error(w, "Failed to retrieve payment intent", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"client_secret": pi.ClientSecret,
+		"status":        pi.Status,
+		"amount":        pi.Amount,
+		"currency":      pi.Currency,
+	})
 }

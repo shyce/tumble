@@ -1,6 +1,6 @@
 Tumble Subscription Tiers & Pricing Structure
 Pay-As-You-Go (No Subscription)
-Standard Tote (22"×33", ~2 loads)
+Standard Bag (22"×33", ~2 loads)
 
 Standard Service: $45
 Rush Service: +$10

@@ -366,8 +366,14 @@ export default function OrderDetailPage() {
               )}
               {order.tax !== undefined && (
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Tax (8%):</span>
+                  <span className="text-slate-600">Tax (6%):</span>
                   <span className="font-medium text-slate-900">${order.tax.toFixed(2)}</span>
+                </div>
+              )}
+              {order.tip !== undefined && order.tip > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Tip:</span>
+                  <span className="font-medium text-slate-900">${order.tip.toFixed(2)}</span>
                 </div>
               )}
               <div className="border-t border-slate-200 pt-3 mt-4">

@@ -71,12 +71,11 @@ func TestServiceHandler_GetServices(t *testing.T) {
 
 func TestServiceHandler_ServiceStructure(t *testing.T) {
 	service := Service{
-		ID:            1,
-		Name:          "test_service",
-		Description:   "Test Service",
-		BasePrice:     25.99,
-		PricePerPound: nil,
-		IsActive:      true,
+		ID:          1,
+		Name:        "test_service",
+		Description: "Test Service",
+		BasePrice:   25.99,
+		IsActive:    true,
 	}
 
 	// Test JSON marshaling
@@ -107,58 +106,6 @@ func TestServiceHandler_ServiceStructure(t *testing.T) {
 	}
 }
 
-func TestServiceHandler_ServiceWithPricePerPound(t *testing.T) {
-	db := SetupTestDB(t)
-	defer db.CleanupTestDB()
-
-	// Insert a service with price per pound
-	pricePerPound := 2.50
-	_, err := db.Exec(`
-		INSERT INTO services (name, description, base_price, price_per_pound, is_active)
-		VALUES ($1, $2, $3, $4, true)
-	`, "weight_service", "Weight-based Service", 10.00, pricePerPound)
-	if err != nil {
-		t.Fatalf("Failed to insert test service: %v", err)
-	}
-
-	handler := NewServiceHandler(db.DB)
-
-	req := httptest.NewRequest(http.MethodGet, "/services", nil)
-	w := httptest.NewRecorder()
-
-	handler.handleGetServices(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
-	}
-
-	var services []Service
-	err = json.NewDecoder(w.Body).Decode(&services)
-	if err != nil {
-		t.Errorf("Failed to decode response: %v", err)
-	}
-
-	// Find our weight service
-	var weightService *Service
-	for _, service := range services {
-		if service.Name == "weight_service" {
-			weightService = &service
-			break
-		}
-	}
-
-	if weightService == nil {
-		t.Error("Weight service not found in response")
-		return
-	}
-
-	if weightService.PricePerPound == nil {
-		t.Error("Expected PricePerPound to be set")
-	} else if *weightService.PricePerPound != pricePerPound {
-		t.Errorf("Expected PricePerPound %.2f, got %.2f", 
-			pricePerPound, *weightService.PricePerPound)
-	}
-}
 
 func TestServiceHandler_InactiveServicesNotReturned(t *testing.T) {
 	db := SetupTestDB(t)
@@ -175,9 +122,9 @@ func TestServiceHandler_InactiveServicesNotReturned(t *testing.T) {
 
 	for _, service := range services {
 		_, err := db.Exec(`
-			INSERT INTO services (name, description, base_price, is_active)
+			INSERT INTO services (name, description, base_price_cents, is_active)
 			VALUES ($1, $2, $3, $4)
-		`, service.name, "Test Service", 25.00, service.isActive)
+		`, service.name, "Test Service", 2500, service.isActive) // 25.00 in cents
 		if err != nil {
 			t.Fatalf("Failed to insert test service: %v", err)
 		}

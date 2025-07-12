@@ -64,8 +64,6 @@ export interface SubscriptionPlan {
   name: string
   description: string
   price_per_month: number
-  pounds_included: number
-  price_per_extra_pound: number
   pickups_per_month: number
   is_active: boolean
 }
@@ -137,7 +135,6 @@ export interface Subscription {
   status: string
   current_period_start: string
   current_period_end: string
-  pounds_used_this_period: number
   pickups_used_this_period: number
   created_at: string
   updated_at: string
@@ -183,7 +180,6 @@ export interface Service {
   name: string
   description: string
   base_price: number
-  price_per_pound?: number
   is_active: boolean
 }
 
@@ -204,6 +200,14 @@ export interface CreateOrderRequest {
   delivery_time_slot: string
   special_instructions?: string
   items: OrderItem[]
+  tip?: number
+}
+
+export interface CreateOrderResponse {
+  order: Order
+  payment_intent_id?: string
+  checkout_url?: string
+  requires_payment: boolean
 }
 
 export interface Order {
@@ -216,6 +220,7 @@ export interface Order {
   total_weight?: number
   subtotal?: number
   tax?: number
+  tip?: number
   total?: number
   special_instructions?: string
   pickup_date: string
@@ -424,7 +429,7 @@ export const subscriptionApi = {
 }
 
 export const orderApi = {
-  async createOrder(session: any, request: CreateOrderRequest): Promise<Order> {
+  async createOrder(session: any, request: CreateOrderRequest): Promise<CreateOrderResponse> {
     const response = await authFetchWithSession(session, `${API_BASE_URL}/api/v1/orders/create`, {
       method: 'POST',
       body: JSON.stringify(request),

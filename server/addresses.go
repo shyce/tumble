@@ -398,6 +398,31 @@ func (h *AddressHandler) handleDeleteAddress(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Check if address is referenced by any orders
+	var orderCount int
+	err = h.db.QueryRow(`
+		SELECT COUNT(*) FROM orders 
+		WHERE (pickup_address_id = $1 OR delivery_address_id = $1) 
+		AND user_id = $2`,
+		addressID, userID,
+	).Scan(&orderCount)
+	if err != nil {
+		http.Error(w, "Failed to check address usage", http.StatusInternalServerError)
+		return
+	}
+
+	if orderCount > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "Cannot delete address",
+			"message": fmt.Sprintf("This address is used by %d order(s) and cannot be deleted. You can edit the address instead.", orderCount),
+			"conflict_type": "orders_reference",
+			"order_count": orderCount,
+		})
+		return
+	}
+
 	// Delete address
 	result, err := h.db.Exec(`
 		DELETE FROM addresses 

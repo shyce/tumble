@@ -40,10 +40,8 @@ CREATE TABLE subscription_plans (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    price_per_month DECIMAL(10,2) NOT NULL,
-    pounds_included INTEGER NOT NULL,
-    price_per_extra_pound DECIMAL(10,2) NOT NULL,
-    pickups_per_month INTEGER NOT NULL,
+    price_per_month_cents INTEGER NOT NULL, -- Store in cents (pennies)
+    pickups_per_month INTEGER NOT NULL, -- Number of bags/pickups included
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,7 +54,6 @@ CREATE TABLE subscriptions (
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
     current_period_start DATE NOT NULL,
     current_period_end DATE NOT NULL,
-    pounds_used_this_period INTEGER DEFAULT 0,
     pickups_used_this_period INTEGER DEFAULT 0,
     stripe_subscription_id VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -68,8 +65,7 @@ CREATE TABLE services (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL, -- 'wash_fold', 'dry_clean', 'pressing', etc.
     description TEXT,
-    base_price DECIMAL(10,2) NOT NULL,
-    price_per_pound DECIMAL(10,2),
+    base_price_cents INTEGER NOT NULL, -- Store in cents (pennies)
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -86,9 +82,10 @@ CREATE TABLE orders (
         'ready', 'out_for_delivery', 'delivered', 'cancelled'
     )),
     total_weight DECIMAL(10,2),
-    subtotal DECIMAL(10,2),
-    tax DECIMAL(10,2),
-    total DECIMAL(10,2),
+    subtotal_cents INTEGER, -- Store in cents (pennies)
+    tax_cents INTEGER, -- Store in cents (pennies)
+    tip_cents INTEGER, -- Store in cents (pennies)
+    total_cents INTEGER, -- Store in cents (pennies)
     special_instructions TEXT,
     pickup_date DATE,
     delivery_date DATE,
@@ -105,7 +102,7 @@ CREATE TABLE order_items (
     service_id INTEGER REFERENCES services(id),
     quantity INTEGER NOT NULL,
     weight DECIMAL(10,2),
-    price DECIMAL(10,2) NOT NULL,
+    price_cents INTEGER NOT NULL, -- Store in cents (pennies)
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -153,7 +150,7 @@ CREATE TABLE payments (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     order_id INTEGER REFERENCES orders(id),
     subscription_id INTEGER REFERENCES subscriptions(id),
-    amount DECIMAL(10,2) NOT NULL,
+    amount_cents INTEGER NOT NULL, -- Store in cents (pennies)
     payment_type VARCHAR(20) CHECK (payment_type IN ('subscription', 'extra_order', 'overage')),
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
     stripe_payment_intent_id VARCHAR(255),

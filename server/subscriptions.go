@@ -23,14 +23,12 @@ type SubscriptionHandler struct {
 }
 
 type SubscriptionPlan struct {
-	ID                 int     `json:"id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
-	PricePerMonth      float64 `json:"price_per_month"`
-	PoundsIncluded     int     `json:"pounds_included"`
-	PricePerExtraPound float64 `json:"price_per_extra_pound"`
-	PickupsPerMonth    int     `json:"pickups_per_month"`
-	IsActive           bool    `json:"is_active"`
+	ID              int     `json:"id"`
+	Name            string  `json:"name"`
+	Description     string  `json:"description"`
+	PricePerMonth   float64 `json:"price_per_month"`   // Convert from cents for JSON
+	PickupsPerMonth int     `json:"pickups_per_month"`
+	IsActive        bool    `json:"is_active"`
 }
 
 type Subscription struct {
@@ -109,11 +107,10 @@ func (h *SubscriptionHandler) handleGetPlans(w http.ResponseWriter, r *http.Requ
 	}
 
 	rows, err := h.db.Query(`
-		SELECT id, name, description, price_per_month, pounds_included, 
-			   price_per_extra_pound, pickups_per_month, is_active
+		SELECT id, name, description, price_per_month_cents, pickups_per_month, is_active
 		FROM subscription_plans
 		WHERE is_active = true
-		ORDER BY price_per_month ASC`)
+		ORDER BY price_per_month_cents ASC`)
 	if err != nil {
 		http.Error(w, "Failed to fetch plans", http.StatusInternalServerError)
 		return
@@ -123,16 +120,18 @@ func (h *SubscriptionHandler) handleGetPlans(w http.ResponseWriter, r *http.Requ
 	plans := []SubscriptionPlan{}
 	for rows.Next() {
 		var plan SubscriptionPlan
+		var pricePerMonthCents int
 		err := rows.Scan(
 			&plan.ID, &plan.Name, &plan.Description,
-			&plan.PricePerMonth, &plan.PoundsIncluded,
-			&plan.PricePerExtraPound, &plan.PickupsPerMonth,
+			&pricePerMonthCents, &plan.PickupsPerMonth,
 			&plan.IsActive,
 		)
 		if err != nil {
 			http.Error(w, "Failed to parse plans", http.StatusInternalServerError)
 			return
 		}
+		// Convert cents to dollars for JSON response
+		plan.PricePerMonth = float64(pricePerMonthCents) / 100.0
 		plans = append(plans, plan)
 	}
 
@@ -156,13 +155,14 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 
 	var subscription Subscription
 	var plan SubscriptionPlan
+	var pricePerMonthCents int
 
 	err = h.db.QueryRow(`
 		SELECT s.id, s.user_id, s.plan_id, s.status,
 			   s.current_period_start, s.current_period_end,
 			   s.stripe_subscription_id, s.created_at, s.updated_at,
-			   p.id, p.name, p.description, p.price_per_month,
-			   p.pounds_included, p.price_per_extra_pound, p.pickups_per_month
+			   p.id, p.name, p.description, p.price_per_month_cents,
+			   p.pickups_per_month
 		FROM subscriptions s
 		JOIN subscription_plans p ON s.plan_id = p.id
 		WHERE s.user_id = $1
@@ -174,8 +174,8 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 		&subscription.Status, &subscription.CurrentPeriodStart,
 		&subscription.CurrentPeriodEnd, &subscription.StripeSubscriptionID, 
 		&subscription.CreatedAt, &subscription.UpdatedAt,
-		&plan.ID, &plan.Name, &plan.Description, &plan.PricePerMonth,
-		&plan.PoundsIncluded, &plan.PricePerExtraPound, &plan.PickupsPerMonth,
+		&plan.ID, &plan.Name, &plan.Description, &pricePerMonthCents,
+		&plan.PickupsPerMonth,
 	)
 
 	if err != nil {
@@ -186,6 +186,9 @@ func (h *SubscriptionHandler) handleGetSubscription(w http.ResponseWriter, r *ht
 		}
 		return
 	}
+	
+	// Convert cents to dollars for JSON response
+	plan.PricePerMonth = float64(pricePerMonthCents) / 100.0
 
 	subscription.Plan = &plan
 
@@ -333,35 +336,35 @@ func (h *SubscriptionHandler) handlePreviewSubscriptionChange(w http.ResponseWri
 	// Get plan details
 	var currentPlan, newPlan SubscriptionPlan
 	
+	var currentPlanPriceCents int
 	err = h.db.QueryRow(`
-		SELECT id, name, description, price_per_month, pounds_included, 
-			   price_per_extra_pound, pickups_per_month, is_active
+		SELECT id, name, description, price_per_month_cents, pickups_per_month, is_active
 		FROM subscription_plans WHERE id = $1
 	`, currentSub.PlanID).Scan(
 		&currentPlan.ID, &currentPlan.Name, &currentPlan.Description,
-		&currentPlan.PricePerMonth, &currentPlan.PoundsIncluded,
-		&currentPlan.PricePerExtraPound, &currentPlan.PickupsPerMonth,
+		&currentPlanPriceCents, &currentPlan.PickupsPerMonth,
 		&currentPlan.IsActive,
 	)
 	if err != nil {
 		http.Error(w, "Current plan not found", http.StatusInternalServerError)
 		return
 	}
+	currentPlan.PricePerMonth = float64(currentPlanPriceCents) / 100.0
 
+	var newPlanPriceCents int
 	err = h.db.QueryRow(`
-		SELECT id, name, description, price_per_month, pounds_included, 
-			   price_per_extra_pound, pickups_per_month, is_active
+		SELECT id, name, description, price_per_month_cents, pickups_per_month, is_active
 		FROM subscription_plans WHERE id = $1 AND is_active = true
 	`, req.NewPlanID).Scan(
 		&newPlan.ID, &newPlan.Name, &newPlan.Description,
-		&newPlan.PricePerMonth, &newPlan.PoundsIncluded,
-		&newPlan.PricePerExtraPound, &newPlan.PickupsPerMonth,
+		&newPlanPriceCents, &newPlan.PickupsPerMonth,
 		&newPlan.IsActive,
 	)
 	if err != nil {
 		http.Error(w, "New plan not found", http.StatusBadRequest)
 		return
 	}
+	newPlan.PricePerMonth = float64(newPlanPriceCents) / 100.0
 
 	preview := SubscriptionChangePreview{
 		CurrentPlan: &currentPlan,
@@ -602,8 +605,8 @@ func (h *SubscriptionHandler) getSubscriptionByID(subscriptionID int) (*Subscrip
 		SELECT s.id, s.user_id, s.plan_id, s.status,
 			   s.current_period_start, s.current_period_end,
 			   s.stripe_subscription_id, s.created_at, s.updated_at,
-			   p.id, p.name, p.description, p.price_per_month,
-			   p.pounds_included, p.price_per_extra_pound, p.pickups_per_month
+			   p.id, p.name, p.description, p.price_per_month_cents,
+			   p.pickups_per_month
 		FROM subscriptions s
 		JOIN subscription_plans p ON s.plan_id = p.id
 		WHERE s.id = $1`,
@@ -614,7 +617,7 @@ func (h *SubscriptionHandler) getSubscriptionByID(subscriptionID int) (*Subscrip
 		&subscription.CurrentPeriodEnd, &subscription.StripeSubscriptionID,
 		&subscription.CreatedAt, &subscription.UpdatedAt,
 		&plan.ID, &plan.Name, &plan.Description, &plan.PricePerMonth,
-		&plan.PoundsIncluded, &plan.PricePerExtraPound, &plan.PickupsPerMonth,
+		&plan.PickupsPerMonth,
 	)
 
 	if err != nil {
@@ -670,7 +673,7 @@ func (h *SubscriptionHandler) handleGetSubscriptionUsage(w http.ResponseWriter, 
 	err = h.db.QueryRow(`
 		SELECT 
 			COUNT(DISTINCT o.id), 
-			COALESCE(SUM(CASE WHEN oi.price = 0 AND s.name = 'standard_bag' THEN oi.quantity ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN oi.price_cents = 0 AND s.name = 'standard_bag' THEN oi.quantity ELSE 0 END), 0)
 		FROM orders o
 		LEFT JOIN order_items oi ON o.id = oi.order_id
 		LEFT JOIN services s ON oi.service_id = s.id
@@ -883,21 +886,21 @@ func (h *SubscriptionHandler) handleCreateOrUpdateSubscriptionPreferences(w http
 func (h *SubscriptionHandler) processSubscriptionPlanChange(subscriptionID, userID, currentPlanID, newPlanID int, stripeSubscriptionID sql.NullString) error {
 	// Validate new plan exists and is active
 	var planExists bool
-	var newPlanPrice float64
-	var currentPlanPrice float64
+	var newPlanPriceCents int
+	var currentPlanPriceCents int
 	
 	err := h.db.QueryRow(`
 		SELECT EXISTS(SELECT 1 FROM subscription_plans WHERE id = $1 AND is_active = true),
-		       (SELECT price_per_month FROM subscription_plans WHERE id = $1),
-		       (SELECT price_per_month FROM subscription_plans WHERE id = $2)
-	`, newPlanID, currentPlanID).Scan(&planExists, &newPlanPrice, &currentPlanPrice)
+		       (SELECT price_per_month_cents FROM subscription_plans WHERE id = $1),
+		       (SELECT price_per_month_cents FROM subscription_plans WHERE id = $2)
+	`, newPlanID, currentPlanID).Scan(&planExists, &newPlanPriceCents, &currentPlanPriceCents)
 	
 	if err != nil || !planExists {
 		return fmt.Errorf("invalid_plan")
 	}
 
 	// For upgrades, check if user has payment method
-	if newPlanPrice > currentPlanPrice {
+	if newPlanPriceCents > currentPlanPriceCents {
 		var hasPaymentMethod bool
 		err = h.db.QueryRow(`
 			SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND default_payment_method_id IS NOT NULL)
@@ -934,17 +937,17 @@ func (h *SubscriptionHandler) processSubscriptionPlanChange(subscriptionID, user
 func (h *SubscriptionHandler) calculateProrationPreview(preview *SubscriptionChangePreview, stripeSubscriptionID string, newPlanID int) error {
 	// Get new plan details for Stripe price lookup
 	var planName string
-	var pricePerMonth float64
+	var pricePerMonthCents int
 	err := h.db.QueryRow(`
-		SELECT name, price_per_month FROM subscription_plans WHERE id = $1
-	`, newPlanID).Scan(&planName, &pricePerMonth)
+		SELECT name, price_per_month_cents FROM subscription_plans WHERE id = $1
+	`, newPlanID).Scan(&planName, &pricePerMonthCents)
 	
 	if err != nil {
 		return err
 	}
 
-	// Get or create Stripe price for the new plan
-	_, err = h.getOrCreateStripePrice(planName, int64(pricePerMonth*100))
+	// Get or create Stripe price for the new plan (already in cents)
+	_, err = h.getOrCreateStripePrice(planName, int64(pricePerMonthCents))
 	if err != nil {
 		return err
 	}
@@ -959,7 +962,7 @@ func (h *SubscriptionHandler) calculateProrationPreview(preview *SubscriptionCha
 	// Note: This is a simplified approach. In production, you might want to use
 	// Stripe's upcoming invoice preview API for more accurate calculations
 	currentPrice := float64(sub.Items.Data[0].Price.UnitAmount) / 100
-	newPrice := pricePerMonth
+	newPrice := float64(pricePerMonthCents) / 100.0
 	
 	// Calculate simple price difference for preview
 	// Note: This is a simplified calculation. For accurate proration,
@@ -985,17 +988,17 @@ func (h *SubscriptionHandler) calculateProrationPreview(preview *SubscriptionCha
 func (h *SubscriptionHandler) updateStripeSubscriptionPlan(stripeSubscriptionID string, newPlanID int) error {
 	// Get plan details
 	var planName string
-	var pricePerMonth float64
+	var pricePerMonthCents int
 	err := h.db.QueryRow(`
-		SELECT name, price_per_month FROM subscription_plans WHERE id = $1
-	`, newPlanID).Scan(&planName, &pricePerMonth)
+		SELECT name, price_per_month_cents FROM subscription_plans WHERE id = $1
+	`, newPlanID).Scan(&planName, &pricePerMonthCents)
 	
 	if err != nil {
 		return fmt.Errorf("failed to get plan details: %v", err)
 	}
 
-	// Get or create Stripe price for the new plan
-	priceID, err := h.getOrCreateStripePrice(planName, int64(pricePerMonth*100))
+	// Get or create Stripe price for the new plan (already in cents)
+	priceID, err := h.getOrCreateStripePrice(planName, int64(pricePerMonthCents))
 	if err != nil {
 		return fmt.Errorf("failed to create Stripe price: %v", err)
 	}

@@ -4,8 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Calendar, MapPin, Package, Plus, Minus, Crown, Loader2 } from 'lucide-react'
-import { addressApi, serviceApi, orderApi, subscriptionApi, Address, Service, OrderItem, SubscriptionUsage, CostCalculation } from '@/lib/api'
+import { Calendar, MapPin, Package, Plus, Minus, Crown, Loader2, CreditCard } from 'lucide-react'
+import { addressApi, serviceApi, orderApi, subscriptionApi, Address, Service, OrderItem, SubscriptionUsage, CostCalculation, CreateOrderResponse } from '@/lib/api'
+import { addMoney, calculateTax, formatMoney } from '@/lib/money'
 import PageHeader from '@/components/PageHeader'
 import { TumbleButton } from '@/components/ui/tumble-button'
 
@@ -33,6 +34,7 @@ export default function SchedulePage() {
   const [tip, setTip] = useState(0)
   const [customTip, setCustomTip] = useState('')
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  
 
   const timeSlots = [
     '8:00 AM - 12:00 PM',
@@ -75,8 +77,7 @@ export default function SchedulePage() {
           // Set default order item to standard bag service
           const standardBagService = servicesData.find(s => s.name === 'standard_bag')
           if (standardBagService) {
-            // Standard totes are $45 for pay-as-you-go customers
-            setOrderItems([{ service_id: standardBagService.id, quantity: 1, price: 45 }])
+            setOrderItems([{ service_id: standardBagService.id, quantity: 1, price: 30 }])
           }
 
           // Set default dates (tomorrow for pickup, day after for delivery)
@@ -108,8 +109,7 @@ export default function SchedulePage() {
   const addOrderItem = () => {
     const standardBagService = services.find(s => s.name === 'standard_bag')
     if (standardBagService) {
-      // Standard totes are $45 for pay-as-you-go customers
-      setOrderItems(prev => [...prev, { service_id: standardBagService.id, quantity: 1, price: 45 }])
+      setOrderItems(prev => [...prev, { service_id: standardBagService.id, quantity: 1, price: 30 }])
     }
   }
 
@@ -120,22 +120,37 @@ export default function SchedulePage() {
   }
 
   const calculateCost = (): CostCalculation => {
-    // Calculate pickup service cost (free with subscription, $10 without)
-    const pickupServiceCost = 10.0
-    const pickupCovered = !!(subscriptionUsage && subscriptionUsage.pickups_remaining > 0)
+    // Calculate pickup service cost
+    // For pay-as-you-go: pickup is included in the $30 bag price
+    // For subscribers: pickup is free within quota, $10 if over quota
+    let pickupServiceCost = 0.0
+    let pickupCovered = true
     
-    // Calculate bag costs - Standard Totes are $45 pay-as-you-go
+    if (subscriptionUsage) {
+      // Subscriber - check if within pickup quota
+      if (subscriptionUsage.pickups_remaining > 0) {
+        pickupServiceCost = 0.0
+        pickupCovered = true
+      } else {
+        // Over quota - charge pickup fee
+        pickupServiceCost = 10.0
+        pickupCovered = false
+      }
+    } else {
+      // Pay-as-you-go - pickup included in bag price
+      pickupServiceCost = 0.0
+      pickupCovered = true
+    }
+    
     const bagSubtotal = orderItems.reduce((total, item) => {
       const service = services.find(s => s.id === item.service_id)
-      // Standard totes are $45 for pay-as-you-go customers
-      const price = service?.name === 'standard_bag' ? 45 : (service?.base_price || 0)
+      const price = service?.name === 'standard_bag' ? 30 : (service?.base_price || 0)
       return total + (price * item.quantity)
     }, 0)
     
     // Calculate subscription benefits for bags
     let bagSubscriptionDiscount = 0
     let coveredBags = 0
-    let hasSubscriptionBenefits = pickupCovered
     
     if (subscriptionUsage && subscriptionUsage.bags_remaining > 0) {
       // Find standard bags in the order
@@ -150,28 +165,33 @@ export default function SchedulePage() {
         coveredBags = Math.min(totalBagsInOrder, subscriptionUsage.bags_remaining)
         
         if (coveredBags > 0) {
-          // Subscribers get standard totes covered by their plan
-          bagSubscriptionDiscount = 45 * coveredBags
-          hasSubscriptionBenefits = true
+          // Subscribers get standard bags covered by their plan
+          bagSubscriptionDiscount = 30 * coveredBags
         }
       }
     }
     
-    const totalSubscriptionDiscount = (pickupCovered ? pickupServiceCost : 0) + bagSubscriptionDiscount
-    const subtotalBeforeDiscount = pickupServiceCost + bagSubtotal
+    const totalSubscriptionDiscount = addMoney(
+      (pickupCovered && subscriptionUsage ? pickupServiceCost : 0),
+      bagSubscriptionDiscount
+    )
+    const subtotalBeforeDiscount = addMoney(pickupServiceCost, bagSubtotal)
     const finalSubtotal = Math.max(0, subtotalBeforeDiscount - totalSubscriptionDiscount)
-    const tax = finalSubtotal * 0.06 // 6% tax
-    const total = finalSubtotal + tax + tip
+    
+    // Note: Tax will be calculated automatically by Stripe at payment time
+    // We show estimated tax here for display purposes only
+    const estimatedTax = calculateTax(finalSubtotal) // 6% estimated tax for display
+    const estimatedTotal = addMoney(finalSubtotal, estimatedTax, tip)
     
     return {
       subtotal: subtotalBeforeDiscount,
       subscription_discount: totalSubscriptionDiscount,
       final_subtotal: finalSubtotal,
-      tax,
+      tax: estimatedTax, // This is just for display - actual tax calculated by Stripe
       tip,
-      total,
+      total: estimatedTotal, // This is estimated - actual total determined by Stripe
       covered_bags: coveredBags,
-      has_subscription_benefits: !!hasSubscriptionBenefits
+      has_subscription_benefits: !!(subscriptionUsage && totalSubscriptionDiscount > 0)
     }
   }
   
@@ -188,8 +208,16 @@ export default function SchedulePage() {
       return
     }
 
+    // Check if user has a default address
+    const hasDefaultAddress = addresses.some(addr => addr.is_default)
+    if (!hasDefaultAddress) {
+      setError('Please set a default address in your account settings before placing an order. This is required for tax calculation.')
+      setSubmitting(false)
+      return
+    }
+
     try {
-      await orderApi.createOrder(session, {
+      const response = await orderApi.createOrder(session, {
         pickup_address_id: pickupAddressId!,
         delivery_address_id: deliveryAddressId!,
         pickup_date: pickupDate,
@@ -197,19 +225,28 @@ export default function SchedulePage() {
         pickup_time_slot: pickupTimeSlot,
         delivery_time_slot: deliveryTimeSlot,
         special_instructions: specialInstructions || undefined,
-        items: orderItems
+        items: orderItems,
+        tip: tip
       })
 
-      setSuccess('Pickup scheduled successfully!')
-      setTimeout(() => {
-        router.push('/dashboard/orders')
-      }, 2000)
-    } catch {
-      setError('Failed to schedule pickup')
+
+      if (response.requires_payment && response.checkout_url) {
+        // Redirect to Stripe Checkout for payment
+        window.location.href = response.checkout_url
+      } else {
+        // No payment required - order complete
+        setSuccess('Pickup scheduled successfully!')
+        setTimeout(() => {
+          router.push('/dashboard/orders')
+        }, 2000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to schedule pickup')
     } finally {
       setSubmitting(false)
     }
   }
+
 
   if (loading || status === 'loading') {
     return (
@@ -344,7 +381,7 @@ export default function SchedulePage() {
               </div>
             </div>
 
-            {addresses.length === 0 && (
+            {addresses.length === 0 ? (
               <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-yellow-700 text-sm">
                   You need to add an address before scheduling a pickup.{' '}
@@ -353,7 +390,16 @@ export default function SchedulePage() {
                   </Link>
                 </p>
               </div>
-            )}
+            ) : !addresses.some(addr => addr.is_default) ? (
+              <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                <p className="text-orange-700 text-sm">
+                  You need to set a default address for tax calculation.{' '}
+                  <Link href="/dashboard/settings" className="text-teal-600 hover:text-teal-700 underline">
+                    Set a default address in settings
+                  </Link>
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {/* Schedule Section */}
@@ -443,8 +489,8 @@ export default function SchedulePage() {
                     onChange={(e) => {
                       const serviceId = Number(e.target.value)
                       const service = services.find(s => s.id === serviceId)
-                      // Standard totes are $45 for pay-as-you-go customers
-                      const price = service?.name === 'standard_bag' ? 45 : (service?.base_price || 0)
+                      // Standard bags are $30 for pay-as-you-go customers
+                      const price = service?.name === 'standard_bag' ? 30 : (service?.base_price || 0)
                       updateOrderItem(index, { 
                         service_id: serviceId, 
                         price: price 
@@ -453,8 +499,8 @@ export default function SchedulePage() {
                     className="flex-1 p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-slate-900 bg-white"
                   >
                     {services.filter(service => service.name !== 'pickup_service').map(service => {
-                      // Standard totes are $45 for pay-as-you-go customers
-                      const displayPrice = service.name === 'standard_bag' ? 45 : service.base_price
+                      // Standard bags are $30 for pay-as-you-go customers
+                      const displayPrice = service.name === 'standard_bag' ? 30 : service.base_price
                       return (
                         <option key={service.id} value={service.id}>
                           {service.description} - ${displayPrice}
@@ -484,7 +530,7 @@ export default function SchedulePage() {
                   </div>
 
                   <span className="font-semibold text-slate-900 w-20 text-right">
-                    ${(item.price * item.quantity).toFixed(2)}
+                    ${formatMoney(item.price * item.quantity)}
                   </span>
 
                   {orderItems.length > 1 && (
@@ -515,10 +561,12 @@ export default function SchedulePage() {
                   <div className="flex justify-between text-slate-700">
                     <span>Pickup Service:</span>
                     <span>
-                      {subscriptionUsage && subscriptionUsage.pickups_remaining > 0 ? (
-                        <span className="text-emerald-600">Covered</span>
+                      {!subscriptionUsage ? (
+                        <span className="text-slate-500">Included in bag price</span>
+                      ) : subscriptionUsage.pickups_remaining > 0 ? (
+                        <span className="text-emerald-600">Covered by subscription</span>
                       ) : (
-                        <span>$10.00</span>
+                        <span className="text-orange-600">$10.00 (Over quota)</span>
                       )}
                     </span>
                   </div>
@@ -526,12 +574,16 @@ export default function SchedulePage() {
                   {/* Show bag services */}
                   <div className="flex justify-between text-slate-700">
                     <span>Bag Services:</span>
-                    <span>${(costCalculation.subtotal - 10).toFixed(2)}</span>
+                    <span>${formatMoney(orderItems.reduce((total, item) => {
+                      const service = services.find(s => s.id === item.service_id)
+                      const price = service?.name === 'standard_bag' ? 30 : (service?.base_price || 0)
+                      return total + (price * item.quantity)
+                    }, 0))}</span>
                   </div>
                   
                   <div className="flex justify-between text-slate-700 border-t border-slate-300 pt-2">
                     <span>Subtotal:</span>
-                    <span>${costCalculation.subtotal.toFixed(2)}</span>
+                    <span>${formatMoney(costCalculation.subtotal)}</span>
                   </div>
                   
                   {costCalculation.has_subscription_benefits && (
@@ -541,31 +593,34 @@ export default function SchedulePage() {
                           Subscription Benefits 
                           {costCalculation.covered_bags > 0 && ` (${costCalculation.covered_bags} bags covered)`}:
                         </span>
-                        <span>-${costCalculation.subscription_discount.toFixed(2)}</span>
+                        <span>-${formatMoney(costCalculation.subscription_discount)}</span>
                       </div>
                       <div className="flex justify-between text-slate-700">
                         <span>After Discount:</span>
-                        <span>${costCalculation.final_subtotal.toFixed(2)}</span>
+                        <span>${formatMoney(costCalculation.final_subtotal)}</span>
                       </div>
                     </>
                   )}
                   
                   <div className="flex justify-between text-slate-700">
-                    <span>Tax (6%):</span>
-                    <span>${costCalculation.tax.toFixed(2)}</span>
+                    <span>Tax (estimated):</span>
+                    <span>${formatMoney(costCalculation.tax)}</span>
                   </div>
                   
                   {tip > 0 && (
                     <div className="flex justify-between text-slate-700">
                       <span>Tip:</span>
-                      <span>${tip.toFixed(2)}</span>
+                      <span>${formatMoney(tip)}</span>
                     </div>
                   )}
                   
                   <div className="border-t border-slate-300 pt-2">
                     <div className="flex justify-between text-xl font-bold text-slate-900">
-                      <span>Total:</span>
-                      <span>${costCalculation.total.toFixed(2)}</span>
+                      <span>Estimated Total:</span>
+                      <span>${formatMoney(costCalculation.total)}</span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      Final total will be calculated by Stripe based on your address
                     </div>
                   </div>
                   
@@ -604,7 +659,7 @@ export default function SchedulePage() {
                           className="p-3 font-medium flex flex-col"
                         >
                           <div className="text-sm">{percentage}%</div>
-                          <div className="text-xs opacity-75">${tipAmount.toFixed(2)}</div>
+                          <div className="text-xs opacity-75">${formatMoney(tipAmount)}</div>
                         </TumbleButton>
                       )
                     })}
@@ -700,7 +755,7 @@ export default function SchedulePage() {
           <div className="text-center">
             <TumbleButton
               type="submit"
-              disabled={submitting || addresses.length === 0}
+              disabled={submitting || addresses.length === 0 || !addresses.some(addr => addr.is_default)}
               variant="default"
               size="lg"
               className="px-8 py-4 text-lg"
@@ -714,6 +769,7 @@ export default function SchedulePage() {
             </TumbleButton>
           </div>
         </form>
+
     </>
   )
 }

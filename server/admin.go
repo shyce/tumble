@@ -818,7 +818,7 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 
 		// Fetch order items for each order (same as in orders.go)
 		itemRows, err := h.db.Query(`
-			SELECT oi.id, oi.order_id, oi.service_id, s.name, oi.quantity, oi.weight, oi.price, oi.notes
+			SELECT oi.id, oi.order_id, oi.service_id, s.name, oi.quantity, oi.weight, oi.price_cents, oi.notes
 			FROM order_items oi
 			JOIN services s ON oi.service_id = s.id
 			WHERE oi.order_id = $1`,
@@ -828,11 +828,14 @@ func (h *AdminHandler) handleGetAllOrders(w http.ResponseWriter, r *http.Request
 			o.Items = []OrderItem{}
 			for itemRows.Next() {
 				var item OrderItem
+				var priceCents int
 				err := itemRows.Scan(
 					&item.ID, &item.OrderID, &item.ServiceID, &item.ServiceName,
-					&item.Quantity, &item.Weight, &item.Price, &item.Notes,
+					&item.Quantity, &item.Weight, &priceCents, &item.Notes,
 				)
 				if err == nil {
+					// Convert cents to dollars for JSON response
+					item.Price = float64(priceCents) / 100.0
 					o.Items = append(o.Items, item)
 				}
 			}

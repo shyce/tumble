@@ -168,6 +168,7 @@ func main() {
 	api.HandleFunc("/payments/methods/{id}", server.payments.handleDeletePaymentMethod)
 	api.HandleFunc("/payments/subscription", server.payments.handleCreateSubscriptionPayment)
 	api.HandleFunc("/payments/order", server.payments.handleCreateOrderPayment)
+	api.HandleFunc("/payments/payment-intent/{id}", server.payments.handleGetPaymentIntent)
 	api.HandleFunc("/payments/history", server.payments.handleGetPaymentHistory)
 	api.HandleFunc("/payments/webhook", server.payments.handleStripeWebhook)
 

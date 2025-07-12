@@ -15,7 +15,6 @@ type Service struct {
 	Name         string  `json:"name"`
 	Description  string  `json:"description"`
 	BasePrice    float64 `json:"base_price"`
-	PricePerPound *float64 `json:"price_per_pound,omitempty"`
 	IsActive     bool    `json:"is_active"`
 }
 
@@ -31,7 +30,7 @@ func (h *ServiceHandler) handleGetServices(w http.ResponseWriter, r *http.Reques
 	}
 
 	rows, err := h.db.Query(`
-		SELECT id, name, description, base_price, price_per_pound, is_active
+		SELECT id, name, description, base_price_cents, is_active
 		FROM services
 		WHERE is_active = true
 		ORDER BY 
@@ -52,14 +51,18 @@ func (h *ServiceHandler) handleGetServices(w http.ResponseWriter, r *http.Reques
 	services := []Service{}
 	for rows.Next() {
 		var service Service
+		var basePriceCents int
 		err := rows.Scan(
 			&service.ID, &service.Name, &service.Description,
-			&service.BasePrice, &service.PricePerPound, &service.IsActive,
+			&basePriceCents, &service.IsActive,
 		)
 		if err != nil {
 			http.Error(w, "Failed to parse services", http.StatusInternalServerError)
 			return
 		}
+		
+		// Convert cents to dollars for JSON response
+		service.BasePrice = centsToDollars(basePriceCents)
 		services = append(services, service)
 	}
 

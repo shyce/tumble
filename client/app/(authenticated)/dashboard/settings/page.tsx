@@ -16,6 +16,10 @@ import { TumbleTextarea } from '@/components/ui/tumble-textarea'
 import { TumbleCheckbox } from '@/components/ui/tumble-checkbox'
 import { TumbleIconButton } from '@/components/ui/tumble-icon-button'
 import { ChangePasswordModal } from '@/components/ui/change-password-modal'
+import { TumbleConfirmDialog } from '@/components/ui/tumble-confirm-dialog'
+import { TumbleErrorDialog } from '@/components/ui/tumble-error-dialog'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useErrorDialog } from '@/hooks/useErrorDialog'
 
 interface UserProfile {
   id: number
@@ -33,6 +37,10 @@ export default function SettingsPage() {
   const [addresses, setAddresses] = useState<Address[]>([])
   const [showAddressForm, setShowAddressForm] = useState(false)
   const [editingAddress, setEditingAddress] = useState<Address | null>(null)
+  
+  // Dialog hooks
+  const { confirmDialog, showConfirm, hideConfirm } = useConfirmDialog()
+  const { errorDialog, showError, hideError } = useErrorDialog()
   const [profile, setProfile] = useState<UserProfile>({
     id: 1,
     email: '',
@@ -48,7 +56,7 @@ export default function SettingsPage() {
     state: '',
     zip_code: '',
     delivery_instructions: '',
-    is_default: false
+    is_default: true
   })
 
   useEffect(() => {
@@ -120,7 +128,7 @@ export default function SettingsPage() {
         state: '',
         zip_code: '',
         delivery_instructions: '',
-        is_default: false
+        is_default: true
       })
       setShowAddressForm(false)
       setEditingAddress(null)
@@ -149,18 +157,40 @@ export default function SettingsPage() {
   }
 
   const handleDeleteAddress = async (addressId: number) => {
-    if (!confirm('Are you sure you want to delete this address?')) {
-      return
-    }
+    const confirmed = await showConfirm({
+      title: 'Delete Address',
+      description: 'Are you sure you want to delete this address? This action cannot be undone.',
+      confirmText: 'Delete',
+      variant: 'destructive'
+    })
+
+    if (!confirmed) return
 
     try {
       await addressApi.deleteAddress(session, addressId)
       setAddresses(prev => prev.filter(addr => addr.id !== addressId))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to delete address:', error)
-      alert('Failed to delete address. Please try again.')
+      
+      // Check if this is a conflict error with a specific message
+      if (error?.response?.status === 409 && error?.response?.data?.message) {
+        showError({
+          title: 'Cannot Delete Address',
+          message: error.response.data.message
+        })
+      } else if (error?.message) {
+        showError({
+          title: 'Delete Failed',
+          message: `Failed to delete address: ${error.message}`
+        })
+      } else {
+        showError({
+          title: 'Delete Failed',
+          message: 'Failed to delete address. Please try again.'
+        })
+      }
     }
   }
 
@@ -187,7 +217,7 @@ export default function SettingsPage() {
       state: '',
       zip_code: '',
       delivery_instructions: '',
-      is_default: false
+      is_default: true
     })
   }
 
@@ -482,6 +512,27 @@ export default function SettingsPage() {
             </ChangePasswordModal>
           </div>
         </div>
+
+        {/* Confirmation Dialog */}
+        <TumbleConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          onClose={hideConfirm}
+          onConfirm={confirmDialog.onConfirm}
+          title={confirmDialog.title}
+          description={confirmDialog.description}
+          confirmText={confirmDialog.confirmText}
+          cancelText={confirmDialog.cancelText}
+          variant={confirmDialog.variant}
+        />
+
+        {/* Error Dialog */}
+        <TumbleErrorDialog
+          isOpen={errorDialog.isOpen}
+          onClose={hideError}
+          title={errorDialog.title}
+          message={errorDialog.message}
+          variant={errorDialog.variant}
+        />
     </>
   )
 }
